@@ -1,6 +1,6 @@
 # ⛏ WebCraft — Minecraft in your browser
 
-**▶ Play online:** https://professionalarduino-max.github.io/WebCraft/ &nbsp;·&nbsp; **Multiplayer server:** _paste your server link here_ (see [Deploy the multiplayer server](#deploy-the-multiplayer-server))
+**▶ Play online:** https://professionalarduino-max.github.io/WebCraft/ &nbsp;·&nbsp; **Multiplayer server:** (https://webcraft-h4g9.onrender.com/) (see [Deploy the multiplayer server](#deploy-the-multiplayer-server))
 
 A 3D Minecraft clone that runs entirely in the browser. No build step, no dependencies to install — just static HTML/JS (Three.js loaded from a CDN), so it works out of the box on GitHub Pages.
 

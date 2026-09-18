@@ -1,0 +1,74 @@
+name: Backup the multiplayer world
+
+# Free hosting plans wipe their disk on every restart, so this job copies the
+# live world out of the running server and stores it in the "world" branch.
+# The server pulls it back at boot through --db-url (see render.yaml).
+#
+# One-time setup: repository Settings -> Secrets and variables -> Actions ->
+# Variables -> New repository variable:  APP_URL = https://your-app.onrender.com
+# Runs every 20 minutes; only real changes (a new build) create a commit.
+
+on:
+  schedule:
+    - cron: '*/20 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: world-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    env:
+      APP_URL: ${{ vars.APP_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download the world snapshot
+        run: |
+          if [ -z "$APP_URL" ]; then echo "APP_URL variable is not set - skipping"; exit 0; fi
+          mkdir -p /tmp/world
+          code=$(curl -s -o /tmp/world/db.json -w '%{http_code}' --max-time 60 "$APP_URL/export" || true)
+          echo "GET $APP_URL/export -> $code"
+          test "$code" = "200" || { echo "server not reachable (asleep?) - keeping the previous backup"; exit 0; }
+          python3 - <<'PY'
+          import json
+          d = json.load(open('/tmp/world/db.json'))
+          print('deltas:', len(d.get('deltas', [])), 'seed:', d.get('seed'), 'ops:', d.get('ops'))
+          PY
+
+      - name: Store it in the 'world' branch (only when the build changed)
+        run: |
+          git config user.name  "webcraft-backup[bot]"
+          git config user.email "webcraft-backup@users.noreply.github.com"
+
+          # signature of the build: block edits, seed and operators (time/weather
+          # change constantly, so they are ignored to avoid commit noise)
+          cat > /tmp/sig.py <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          edits = sorted(f"{e['dim']}:{e['x']},{e['y']},{e['z']}={e['id']}" for e in d.get('deltas', []))
+          print(json.dumps([d.get('seed'), edits, sorted(d.get('ops', []))]))
+          PY
+          NEW=$(python3 /tmp/sig.py /tmp/world/db.json)
+
+          git fetch origin world --depth=1 2>/dev/null || true
+          if git show-ref -q refs/remotes/origin/world; then
+            git show origin/world:server/db.json > /tmp/prev.json 2>/dev/null || echo '{}' > /tmp/prev.json
+            OLD=$(python3 /tmp/sig.py /tmp/prev.json)
+            if [ "$OLD" = "$NEW" ]; then echo "world unchanged, nothing to store"; exit 0; fi
+          fi
+
+          git checkout --orphan world-tmp
+          git rm -rf --cached . >/dev/null 2>&1 || true
+          mkdir -p server
+          cp /tmp/world/db.json server/db.json
+          git add -f server/db.json
+          git commit -m "world backup $(date -u +'%Y-%m-%d %H:%M UTC')"
+          git push -f origin world-tmp:world

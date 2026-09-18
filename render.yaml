@@ -1,0 +1,18 @@
+# Render Blueprint - one-click deploy of the WebCraft multiplayer server.
+# Render dashboard -> New -> Blueprint -> pick this repository.
+# Free plan: HTTPS/wss included, but the service sleeps after 15 idle minutes
+# (~1 min cold start) and its filesystem is wiped on restart - the bundled
+# world-backup workflow restores the world automatically (see README).
+services:
+  - type: web
+    name: webcraft
+    runtime: node
+    plan: free
+    buildCommand: "echo no build step needed"
+    startCommand: node server/mp-server.js --port $PORT --name "WebCraft"
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: MP_DB_URL
+        value: https://raw.githubusercontent.com/professionalarduino-max/WebCraft/world/server/db.json

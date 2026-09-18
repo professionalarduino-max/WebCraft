@@ -33,7 +33,7 @@ A 3D Minecraft clone that runs entirely in the browser. No build step, no depend
 - **World persistence** — your edits, inventory, position, and time of day auto-save to `localStorage`
 - **Juice** — block-break particles, procedural sound effects, ambient-occlusion shading, held-item viewmodel, damage vignette
 
-- **Multiplayer (NEW)** — run `node server/mp-server.js` (zero dependencies), press ⛁ Multiplayer, join with friends: shared blocks, live player avatars with nameplates and arm swings, chat, /tell, Tab player list, operator kicks, synced time and weather, death messages, persistent world (`server/db.json`)
+- **Multiplayer (NEW)** — run `node server/mp-server.js` (zero dependencies), press ⛁ Multiplayer, join with friends: shared blocks, live player avatars with nameplates and arm swings, chat, /tell, Tab player list, operator kicks, synced time and weather, death messages, persistent world (`server/db.json`), reconnect tokens and automatic reconnect after a short network outage
 - **Chat & cheat commands (NEW)** — T to chat, / for 20+ commands: /gamemode, /give, /tp, /spawn, /time, /weather, /kill, /heal, /clear, /fly, /summon, /setblock, /locate, /rd, /seed, /me, /list, /tell, /op, /kick (Tab-completion, ↑↓ history)
 - **Tool & armor durability (NEW)** — Minecraft values (gold is fast but fragile), damage bars, items break
 - **Drowning, clouds & rain (NEW)** — air bubbles, drifting blocky clouds, /weather rain with sound and dark skies
@@ -80,6 +80,18 @@ ruby -run -e httpd . -p 8123     # or: python3 -m http.server 8123
 ```
 
 Then open <http://localhost:8123>.
+
+For multiplayer, serve the game and WebSocket endpoint from the same process:
+
+```sh
+node server/mp-server.js --port 8080 --name "My WebCraft Server"
+```
+
+Open `http://localhost:8080` for every player. The first player on a fresh
+`server/db.json` becomes an operator; `/status` shows the current online list.
+The client keeps a short reconnect token, restores the same player identity
+after a refresh, queues edits made during a brief disconnect, and applies the
+server's complete block snapshot to unloaded chunks as they are discovered.
 
 ## Deploy to GitHub Pages
 

@@ -1140,14 +1140,19 @@ if (prefs.mpAddr === legacyAddr()) { prefs.mpAddr = defaultAddr(); savePrefs(); 
 if (mpAddr && !mpAddr.value) mpAddr.value = prefs.mpAddr || defaultAddr();
 function refreshMP() {
   if (!mpStatus) return;
-  if (playMPBtn) playMPBtn.style.display = mpSession ? 'block' : 'none';
+  const active = !!(net.online || net.connecting);
+  if (playMPBtn) playMPBtn.style.display = mpSession && net.online ? 'block' : 'none';
   if (mpSession) {
-    mpStatus.textContent = net.online ? `Подключено: ${net.name || mpSession.name}` : `Подключение к ${mpSession.addr}…`;
-    mpJoin.style.display = 'none';
+    if (net.online) mpStatus.textContent = `Подключено: ${net.name || mpSession.name}`;
+    else if (net.connecting) mpStatus.textContent = `Подключение к ${mpSession.addr}…`;
+    else mpStatus.textContent = 'Соединение потеряно — можно подключиться заново';
+    mpJoin.style.display = active ? 'none' : '';
+    mpJoin.textContent = 'Подключиться заново';
     mpLeave.style.display = '';
   } else {
     mpStatus.textContent = 'Общий мир: постройки хранятся на сервере';
     mpJoin.style.display = '';
+    mpJoin.textContent = 'Подключиться';
     mpLeave.style.display = 'none';
   }
 }
@@ -1160,14 +1165,24 @@ if (mpJoin) mpJoin.addEventListener('click', () => {
   mpStatus.textContent = 'Подключение…';
   save(); // keep the singleplayer world safe first
   net.connect(addr, name, {
+    token: mpSession && mpSession.addr === addr ? mpSession.token : '',
     onWelcome: (m) => {
-      try { sessionStorage.setItem('webcraft_mp', JSON.stringify({ addr, name: m.name || name, seed: m.seed })); } catch (e) {}
-      try { net.sock && net.sock.close(); } catch (e) {}
-      net.sock = null; net.connected = false;
+      try {
+        sessionStorage.setItem('webcraft_mp', JSON.stringify({
+          addr, name: m.name || name, seed: m.seed, token: m.token || '',
+        }));
+      } catch (e) {}
+      net.disconnect(false);
       location.reload();
     },
-    onClose: () => { if (mpStatus.textContent === 'Подключение…') mpStatus.textContent = 'Не удалось подключиться — сервер запущен?'; },
-    onError: () => { if (mpStatus.textContent === 'Подключение…') mpStatus.textContent = 'Ошибка соединения — проверьте адрес'; },
+    onClose: () => {
+      if (mpStatus.textContent === 'Подключение…') mpStatus.textContent = 'Не удалось подключиться — сервер запущен?';
+      refreshMP();
+    },
+    onError: () => {
+      if (mpStatus.textContent === 'Подключение…') mpStatus.textContent = 'Ошибка соединения — проверьте адрес';
+      refreshMP();
+    },
   });
   setTimeout(() => {
     if (mpStatus.textContent === 'Подключение…') {
@@ -3744,20 +3759,14 @@ function makeNameSprite(name) {
   return sp;
 }
 
-// after joining, push our locally saved edits so everyone sees them
+// Flush edits made while the socket was connecting or temporarily offline.
+// The server snapshot remains authoritative; do not resend every local edit on
+// every reconnect, because an old browser cache could overwrite newer builds.
 function pushLocalEdits() {
-  if (!net.online) return;
-  const all = [];
-  for (const w of [worldOver, worldNether, worldEnd]) {
-    for (const [ck, m] of w.edits) {
-      const [cx, cz] = ck.split(',').map(Number);
-      for (const [lk, id] of m) {
-        const [lx, y, lz] = lk.split(',').map(Number);
-        all.push({ dim: w.dim, x: cx * 16 + lx, y, z: cz * 16 + lz, id });
-      }
-    }
-  }
-  for (let i = 0; i < all.length; i += 500) net.sendSets(all.slice(i, i + 500));
+  if (!net.online || !pendingSets.length) return;
+  const rows = pendingSets.splice(0, pendingSets.length);
+  const list = rows.map(([d, x, y, z, id, f]) => ({ dim: d, x, y, z, id, f }));
+  if (!net.sendSets(list)) pendingSets.unshift(...rows);
 }
 
 // item mesh floating in a remote player's right hand
@@ -3815,7 +3824,7 @@ function pasteStructure(key, bx, by, bz) {
 
 function updateRemotes(dt) {
   if (!mpSession || !net.online) return;
-  if (pendingSets.length) net.sendSets(pendingSets.splice(0, pendingSets.length).map(([d, x, y, z, id, f]) => ({ dim: d, x, y, z, id, f })));
+  pushLocalEdits();
   if (swingT < prevSwingT) net.sendAct('swing'); // our arm swung: tell everyone
   prevSwingT = swingT;
   netPosT -= dt;
@@ -3910,29 +3919,55 @@ initChat({
 
 for (const w of [worldOver, worldNether, worldEnd]) { w.onRedstoneAction = dispatchRedstone; w._rsNow = 0; }
 
-if (mpSession) {
-  for (const w of [worldOver, worldNether, worldEnd]) {
-    w.onEdit = (x, y, z, id) => { if (net.online) pendingSets.push([w.dim, x, y, z, id, w._rsData ? (w._rsData.get(x + ',' + y + ',' + z) || {}).f : undefined]); };
-  }
+let mpReconnectTimer = 0;
+let mpReconnectAttempt = 0;
+
+function persistMPSession(m) {
+  if (!mpSession) return;
+  if (m && m.token) mpSession.token = m.token;
+  if (m && Number.isInteger(m.seed)) mpSession.seed = m.seed | 0;
+  try { sessionStorage.setItem('webcraft_mp', JSON.stringify(mpSession)); } catch (e) {}
+}
+
+function scheduleMPReconnect() {
+  if (!mpSession || mpReconnectTimer || net.intentional) return;
+  const delay = Math.min(15000, 1000 * (2 ** Math.min(mpReconnectAttempt++, 4)));
+  mpReconnectTimer = setTimeout(() => {
+    mpReconnectTimer = 0;
+    if (mpSession && !net.online && !net.connecting) connectActiveMP();
+  }, delay);
+}
+
+function connectActiveMP() {
+  if (!mpSession || net.online || net.connecting) return;
+  for (const id of [...remoteModels.keys()]) removeRemote(id);
   net.connect(mpSession.addr, mpSession.name, {
+    token: mpSession.token || '',
     getPos: () => [player.pos.x, player.pos.y, player.pos.z],
     getYaw: () => player.yaw,
+    getPitch: () => player.pitch,
     getDim: () => dim,
     getArmor: mpArmor,
+    getHeld: () => heldId() || 0,
+    getSwim: () => player.swimming ? 1 : 0,
     onWelcome: (m) => {
       if ((m.seed | 0) !== (mpSession.seed | 0)) {
-        mpSession.seed = m.seed | 0;
-        try { sessionStorage.setItem('webcraft_mp', JSON.stringify(mpSession)); } catch (e) {}
+        persistMPSession(m);
         try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
+        net.disconnect(false);
         location.reload();
         return;
       }
+      persistMPSession(m);
+      mpReconnectAttempt = 0;
+      if (mpReconnectTimer) { clearTimeout(mpReconnectTimer); mpReconnectTimer = 0; }
       toast(`Connected to ${m.server || 'server'} as ${m.name}`, 3);
-      chatSys(`Connected to ${m.server || 'server'} — ${m.players.length + 1} online`);
-      if (m.weather === 'rain') setWeather('rain', 0, true);
+      chatSys(`Connected to ${m.server || 'server'} — ${(m.players || []).length + 1} online`);
+      setWeather(m.weather === 'rain' ? 'rain' : 'clear', 0, true);
       if (typeof m.time === 'number') timeOfDay = m.time;
     },
     onSynced: () => pushLocalEdits(),
+    onJoin: () => {},
     onLeave: (id) => removeRemote(id),
     onChat: (from, text) => chatMessage(`<${from}> ${text}`),
     onTell: (from, text) => chatMessage(`[${from} \u2192 you] ${text}`, '#f0a0f0'),
@@ -3942,8 +3977,11 @@ if (mpSession) {
       for (const w of worlds) w._muteEdit = true;
       try {
         for (const s of list) {
+          if (!s || !Number.isInteger(s.x) || !Number.isInteger(s.y) || !Number.isInteger(s.z)
+            || !Number.isInteger(s.id) || !BLOCKS[s.id]) continue;
           const w = s.dim === 'nether' ? worldNether : s.dim === 'end' ? worldEnd : worldOver;
-          w.setBlock(s.x, s.y, s.z, s.id);
+          if (w.applyRemoteEdit) w.applyRemoteEdit(s.x, s.y, s.z, s.id);
+          else w.setBlock(s.x, s.y, s.z, s.id);
           if (Number.isInteger(s.f) && s.f >= 0 && s.f <= 5) {
             if (!w._rsData) w._rsData = new Map();
             const k = s.x + ',' + s.y + ',' + s.z;
@@ -3958,21 +3996,40 @@ if (mpSession) {
     },
     onTime: (t) => { if (Math.abs(t - timeOfDay) > 0.004) timeOfDay = t; },
     onWeather: (mode) => setWeather(mode, 0, true),
+    onOps: () => {},
     onAct: (id, act) => { const r = remoteModels.get(id); if (r && act === 'swing') r.swingT = 0; },
     onDrop: (m) => {
       if (!m || !ITEMS[m.id]) return;
+      if (m.dim && m.dim !== dim) return;
       if (![m.x, m.y, m.z].every(Number.isFinite)) return;
       const es = drops.spawn(m.id, Math.max(1, Math.min(64, m.n | 0)), m.x, m.y, m.z, { stack: true, ttl: 90, dmg: m.dmg | 0, nid: String(m.nid || ''), tag: m.tag || null });
       if (es && es[0]) es[0].vel = { x: +m.vx || 0, y: (+m.vy || 0) + 1, z: +m.vz || 0 };
     },
     onGone: (nid) => drops.removeByNid(nid),
-    onKick: (reason) => toast('Kicked: ' + reason, 4),
+    onKick: (reason) => {
+      if (mpReconnectTimer) { clearTimeout(mpReconnectTimer); mpReconnectTimer = 0; }
+      toast('Kicked: ' + reason, 4);
+    },
+    onError: () => scheduleMPReconnect(),
     onClose: () => {
-      toast('Disconnected from server', 3);
-      chatSys('Disconnected from server');
+      toast('Disconnected from server — reconnecting…', 3);
+      chatSys('Disconnected from server; reconnecting automatically');
       for (const id of [...remoteModels.keys()]) removeRemote(id);
+      scheduleMPReconnect();
     },
   });
+}
+
+if (mpSession) {
+  for (const w of [worldOver, worldNether, worldEnd]) {
+    w.onEdit = (x, y, z, id) => {
+      const f = w._rsData ? (w._rsData.get(x + ',' + y + ',' + z) || {}).f : undefined;
+      // Keep a bounded journal while connecting/offline; updateRemotes flushes
+      // it as soon as the socket is ready.
+      if (pendingSets.length < 20000) pendingSets.push([w.dim, x, y, z, id, f]);
+    };
+  }
+  connectActiveMP();
 }
 
 // ---------------------------------------------------------------------------

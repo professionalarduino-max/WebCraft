@@ -532,29 +532,28 @@ export class World {
     return true;
   }
 
-  // Apply a server edit even when its chunk is not currently loaded. The old
-  // multiplayer code called setBlock directly and silently lost edits sent for
-  // distant chunks; those chunks were regenerated from the seed when a player
-  // later walked there. Keeping the edit map first makes the server snapshot
-  // authoritative across reconnects and render-distance boundaries.
+  // Edits that arrive from the server (another player, or the world snapshot
+  // sent on join) often target chunks that are not loaded right now — a friend
+  // building 500 blocks away, or the whole delta list you get when you rejoin.
+  // setBlock() can only touch a loaded chunk, so those edits used to be dropped
+  // silently and the terrain was then regenerated from the seed without them.
+  // When the chunk is not loaded the edit goes straight into the edit map, which
+  // applyEdits() replays as soon as the chunk is generated.
   applyRemoteEdit(x, y, z, id) {
-    if (!BLOCKS[id] || !Number.isInteger(x) || !Number.isInteger(y) || !Number.isInteger(z)
-      || !Number.isInteger(id) || y < 0 || y >= HEIGHT) return false;
+    if (!Number.isInteger(x) || !Number.isInteger(y) || !Number.isInteger(z)) return false;
+    if (!Number.isInteger(id) || !BLOCKS[id] || y < 0 || y >= HEIGHT) return false;
     const cx = Math.floor(x / CHUNK), cz = Math.floor(z / CHUNK);
-    const lx = x - cx * CHUNK, lz = z - cz * CHUNK;
-    const ck = key(cx, cz);
-    const lk = lx + ',' + y + ',' + lz;
-    const c = this.chunks.get(ck);
-    if (!c) {
-      let ce = this.edits.get(ck);
-      if (!ce) { ce = new Map(); this.edits.set(ck, ce); }
-      ce.set(lk, id);
-      return true;
+    if (this.chunks.has(key(cx, cz))) {
+      const oldMute = this._muteEdit;   // never echo a remote edit back to the server
+      this._muteEdit = true;
+      try { return this.setBlock(x, y, z, id); } finally { this._muteEdit = oldMute; }
     }
-    const oldMute = this._muteEdit;
-    this._muteEdit = true;
-    try { return this.setBlock(x, y, z, id); }
-    finally { this._muteEdit = oldMute; }
+    const lx = x - cx * CHUNK, lz = z - cz * CHUNK;
+    const k = key(cx, cz);
+    let ce = this.edits.get(k);
+    if (!ce) { ce = new Map(); this.edits.set(k, ce); }
+    ce.set(lx + ',' + y + ',' + lz, id);
+    return true;
   }
 
   // liquid flow bookkeeping: fresh liquid is a full-strength source;

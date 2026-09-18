@@ -12,7 +12,7 @@ import { initAudio, sfx, music, materialOf, setSoundsEnabled, setVolume, setRain
 import { buildPlayerModel, posePlayer } from './playermodel.js';
 import { net, defaultAddr, legacyAddr } from './net.js';
 import { STRUCT_BUILDERS } from './structures.js';
-import { initChat, openChat, chatMessage, chatSys, isChatOpen, submitChat } from './chat.js';
+import { initChat, openChat, chatMessage, chatSys, chatErr, isChatOpen, submitChat } from './chat.js';
 import { loadWorlds, storeWorlds, saveKeyFor, hashSeed, touchWorld, deleteWorldSave, newWorldId } from './worlds.js';
 import { mulberry32 } from './noise.js';
 import { I, ITEMS, breakInfo, RECIPES, matchGrid, itemIcon, initItemIcons, itemDamage, maxStack, maxDamage, TIER_NAMES, SMELT_TIME } from './items.js';
@@ -599,6 +599,7 @@ function findOrBuildPortal(tx, tz) {
 
 function setDimension(target) {
   if (target === dim) return;
+  afterTeleport(); // dimensions scale 1:8 — never let the server clamp the move
   if (dim === 'end' && dragon) dragon.group.visible = false;
   world.unloadAll();
   mobs.setActive(false);
@@ -821,7 +822,10 @@ function updateArrows(dt) {
       gone = true;
     } else {
       const nx = a.pos.x + a.vel.x * dt, ny = a.pos.y + a.vel.y * dt, nz = a.pos.z + a.vel.z * dt;
-      if (BLOCKS[world.getBlock(Math.floor(nx), Math.floor(ny), Math.floor(nz))].solid) {
+      const bx = Math.floor(nx), by = Math.floor(ny), bz = Math.floor(nz);
+      if (BLOCKS[world.getBlock(bx, by, bz)].solid) {
+        // hitting a Target block lights it up (power by how close to the centre)
+        if (world.getBlock(bx, by, bz) === B.TARGET) arrowHitTarget(bx, by, bz, a);
         drops.spawn(I.ARROW, 1, a.pos.x, a.pos.y, a.pos.z); // stuck arrows can be picked back up
         sfx.place();
         gone = true;
@@ -1018,11 +1022,36 @@ document.querySelectorAll('.mc-btn').forEach(b =>
   b.addEventListener('pointerdown', () => sfx.click()));
 
 // --- menu screens: main / singleplayer / multiplayer / settings --------------
+async function probeServer() { // live info card on the multiplayer screen
+  if (!mpStatus) return;
+  const addr = (mpAddr && mpAddr.value.trim()) || prefs.mpAddr || defaultAddr();
+  let url = '';
+  try {
+    const u = new URL(addr.replace(/^ws/, 'http'));
+    // only same-origin probes work from the browser (CORS): the game server
+    // serves the page itself, so this hits the server the page came from
+    if (u.host === location.host) url = '/status';
+    else if (u.hostname === location.hostname) url = `${u.protocol}//${u.host}/status`;
+  } catch (e) {}
+  if (!url) { return; }
+  try {
+    const r = await fetch(url + '?t=' + Date.now());
+    if (!r.ok) return;
+    const j = await r.json();
+    if (!j || j.game !== 'webcraft') return;
+    const names = (j.players || []).map(p => (typeof p === 'string' ? p : p.name)).slice(0, 8);
+    mpStatus.innerHTML = `\u2714 ${esc4(j.name || 'WebCraft server')} \u00b7 ${j.online} online` +
+      (names.length ? ` \u00b7 ${names.map(esc4).join(', ')}` : '') +
+      `<br>seed ${j.seed >>> 0} \u00b7 ${j.deltas || 0} block edits`;
+  } catch (e) { /* server not reachable from here — no big deal */ }
+}
+function esc4(x) { return String(x).replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c])); }
+
 function showScreen(name) {
   for (const id of ['menuMain', 'menuSingle', 'menuMP', 'menuSettings']) {
     document.getElementById(id).classList.toggle('show', id === name);
   }
-  if (name === 'menuMP') refreshMP();
+  if (name === 'menuMP') { refreshMP(); probeServer(); }
   if (name === 'menuSingle') renderWorlds();
 }
 document.getElementById('singleBtn').addEventListener('click', () => showScreen('menuSingle'));
@@ -1140,19 +1169,14 @@ if (prefs.mpAddr === legacyAddr()) { prefs.mpAddr = defaultAddr(); savePrefs(); 
 if (mpAddr && !mpAddr.value) mpAddr.value = prefs.mpAddr || defaultAddr();
 function refreshMP() {
   if (!mpStatus) return;
-  const active = !!(net.online || net.connecting);
-  if (playMPBtn) playMPBtn.style.display = mpSession && net.online ? 'block' : 'none';
+  if (playMPBtn) playMPBtn.style.display = mpSession ? 'block' : 'none';
   if (mpSession) {
-    if (net.online) mpStatus.textContent = `Подключено: ${net.name || mpSession.name}`;
-    else if (net.connecting) mpStatus.textContent = `Подключение к ${mpSession.addr}…`;
-    else mpStatus.textContent = 'Соединение потеряно — можно подключиться заново';
-    mpJoin.style.display = active ? 'none' : '';
-    mpJoin.textContent = 'Подключиться заново';
+    mpStatus.textContent = net.online ? `Подключено: ${net.name || mpSession.name}` : `Подключение к ${mpSession.addr}…`;
+    mpJoin.style.display = 'none';
     mpLeave.style.display = '';
   } else {
     mpStatus.textContent = 'Общий мир: постройки хранятся на сервере';
     mpJoin.style.display = '';
-    mpJoin.textContent = 'Подключиться';
     mpLeave.style.display = 'none';
   }
 }
@@ -1164,25 +1188,16 @@ if (mpJoin) mpJoin.addEventListener('click', () => {
   prefs.mpName = name; prefs.mpAddr = addr; savePrefs();
   mpStatus.textContent = 'Подключение…';
   save(); // keep the singleplayer world safe first
+  net.disconnect();
   net.connect(addr, name, {
-    token: mpSession && mpSession.addr === addr ? mpSession.token : '',
     onWelcome: (m) => {
-      try {
-        sessionStorage.setItem('webcraft_mp', JSON.stringify({
-          addr, name: m.name || name, seed: m.seed, token: m.token || '',
-        }));
-      } catch (e) {}
-      net.disconnect(false);
+      try { sessionStorage.setItem('webcraft_mp', JSON.stringify({ addr, name: m.name || name, seed: m.seed })); } catch (e) {}
+      try { net.sock && net.sock.close(); } catch (e) {}
+      net.sock = null; net.connected = false;
       location.reload();
     },
-    onClose: () => {
-      if (mpStatus.textContent === 'Подключение…') mpStatus.textContent = 'Не удалось подключиться — сервер запущен?';
-      refreshMP();
-    },
-    onError: () => {
-      if (mpStatus.textContent === 'Подключение…') mpStatus.textContent = 'Ошибка соединения — проверьте адрес';
-      refreshMP();
-    },
+    onClose: () => { if (mpStatus.textContent === 'Подключение…') mpStatus.textContent = 'Не удалось подключиться — сервер запущен?'; },
+    onError: () => { if (mpStatus.textContent === 'Подключение…') mpStatus.textContent = 'Ошибка соединения — проверьте адрес'; },
   });
   setTimeout(() => {
     if (mpStatus.textContent === 'Подключение…') {
@@ -1193,6 +1208,7 @@ if (mpJoin) mpJoin.addEventListener('click', () => {
 });
 if (mpLeave) mpLeave.addEventListener('click', () => {
   save();
+  try { net.disconnect(); } catch (e) {}
   try { sessionStorage.removeItem('webcraft_mp'); } catch (e) {}
   location.reload();
 });
@@ -1424,6 +1440,7 @@ player.onDeath = () => {
 document.getElementById('respawnBtn').addEventListener('click', () => {
   if (dim !== 'overworld') setDimension('overworld'); // you wake up back home
   player.respawn();
+  afterTeleport(); // tell the server this jump is legit
   ensureAround(player.pos.x, player.pos.z);
   deathScreen.classList.remove('show');
   canvas.requestPointerLock();
@@ -1475,7 +1492,7 @@ function netDrop(id, n, x, y, z, opts) {
   const es = drops.spawn(id, n, x, y, z, opts);
   if (net.online && es) {
     for (const e of es) {
-      e.nid = net.myId + ':' + (dropSeq++);
+      e.nid = net.myId + 's' + (net.sess || 0) + ':' + (dropSeq++);
       net.sendDrop(e.nid, e.id, e.n, e.pos.x, e.pos.y, e.pos.z, e.vel.x, e.vel.y, e.vel.z, e.dmg || 0, e.tag || null);
     }
   }
@@ -2694,7 +2711,7 @@ function useHeld() {
       if (dim !== 'overworld') { toast('You can only sleep in the overworld'); return; }
       player.spawn = { x: hit.x + 0.5, y: hit.y + 1.02, z: hit.z + 0.5 };
       if (daylight < 0.3) {
-        timeOfDay = 0.02; // dawn
+        setTimeOfDay(0.02); // dawn — and everyone else sees the sunrise too
         toast('You sleep through the night… spawn point set', 2.5);
         sfx.portal();
       } else {
@@ -3387,6 +3404,7 @@ function save() {
       },
       edits,
       oneblock: oneblockPhase,
+      mpOutbox: mpSession ? outboxRows() : undefined,
     }));
     if (!mpSession && currentWorldId) touchWorld(currentWorldId);
   } catch (e) { /* storage full or unavailable */ }
@@ -3643,11 +3661,13 @@ function frame(dt) {
     debugEl.textContent =
       `FPS ${fpsSmooth.toFixed(0)}  |  XYZ ${player.pos.x.toFixed(1)} / ${player.pos.y.toFixed(1)} / ${player.pos.z.toFixed(1)}\n` +
       `chunks ${world.chunks.size}  mobs ${mobs.mobs.length}  drops ${drops.list.length}  time ${timeOfDay.toFixed(2)}  daylight ${daylight.toFixed(2)}\n` +
-      `seed ${world.seed >>> 0}  renderDist ${renderDist}  mode ${player.gameMode}  fly ${player.fly}  cam ${camMode}`;
+      `seed ${world.seed >>> 0}  renderDist ${renderDist}  mode ${player.gameMode}  fly ${player.fly}  cam ${camMode}` +
+      (mpSession ? `\nMP ${net.status}${net.online ? '' : ' \u21bb'}  ping ${net.ping || '?'} ms  players ${net.players.size + 1}  edits queued ${editOutbox.size}` : '');
   }
 
   // multiplayer remotes + weather
   updateRemotes(dt);
+  if (tabListShown) renderTabList();
   if (weatherUntil && simTime > weatherUntil && weatherMode === 'rain') setWeather('clear');
   updateClouds(dt);
   updateRain(dt);
@@ -3665,7 +3685,6 @@ applyGameMode(player.gameMode, { silent: true });
 renderHotbar();
 updateHeldItem();
 updateHearts();
-animate();
 
 // ---------------------------------------------------------------------------
 // Multiplayer: shared block edits, remote players, chat, time/weather sync
@@ -3697,12 +3716,104 @@ function spawnTick(dt) {
   wasInSpawn = inside;
 }
 const remoteModels = new Map(); // id -> {group, parts, walkPhase, swingT, armorSig}
-let netPosT = 0, netJump = false, prevSwingT = 0;
-const pendingSets = []; // [dim,x,y,z,id,f?] flushed to the server each frame
+let netJump = false, prevSwingT = 0;
+const lastSentPos = { x: 0, y: 0, z: 0 };
 
 function mpArmor() { return inventory.armor.map(s => (s ? ITEMS[s.id].matKey || null : null)); }
 function afterTeleport() { netJump = true; }
 function afterEdit() { save(); }
+
+// --- outgoing block edits: a small outbox with acknowledgements ------------
+// Every local edit is queued here and sent in batches. The server acks each
+// batch id, and only then is the entry dropped — so edits made during a
+// disconnect (or lost with a dropped socket) are pushed again on reconnect
+// instead of silently vanishing.
+const editOutbox = new Map();  // "dim,x,y,z" -> {dim,x,y,z,id,f,seq}
+const batchKeys = new Map();   // batchId -> [[key, seq], ...]
+let batchSeq = 0, outboxSeq = 0;
+const OUTBOX_MAX = 40000;
+
+let outboxSavedAt = 0;
+
+// rows handed to save(): [dim,x,y,z,id,f+1] (f+1 so 0 means "no facing")
+function outboxRows() {
+  const rows = [];
+  for (const e of editOutbox.values()) rows.push([e.dim, e.x, e.y, e.z, e.id, e.f == null ? 0 : e.f + 1]);
+  return rows;
+}
+
+function outboxLoad(rows) {
+  if (!Array.isArray(rows)) return;
+  for (const r of rows) {
+    if (!Array.isArray(r) || r.length < 5) continue;
+    const [d, x, y, z, id, f] = r;
+    if (d !== 'overworld' && d !== 'nether' && d !== 'end') continue;
+    if (![x, y, z, id].every(Number.isInteger)) continue;
+    const key = d + ',' + x + ',' + y + ',' + z;
+    editOutbox.set(key, { dim: d, x, y, z, id, f: Number.isInteger(f) && f > 0 ? f - 1 : undefined, seq: ++outboxSeq });
+  }
+}
+
+function queueEdit(dim, x, y, z, id, f) {
+  if (!mpSession) return;
+  const k = dim + ',' + x + ',' + y + ',' + z;
+  editOutbox.delete(k); // keep insertion order = send order
+  editOutbox.set(k, { dim, x, y, z, id, f, seq: ++outboxSeq });
+  if (editOutbox.size > OUTBOX_MAX) editOutbox.delete(editOutbox.keys().next().value);
+}
+
+function flushOutbox(force = false) {
+  if (!net.online || !editOutbox.size) return;
+  if (!force && simTime - outboxSavedAt < 0.2) return;
+  outboxSavedAt = simTime;
+  const list = [], keys = [];
+  for (const [k, e] of editOutbox) {
+    const o = { dim: e.dim, x: e.x, y: e.y, z: e.z, id: e.id };
+    if (Number.isInteger(e.f) && e.f >= 0) o.f = e.f;
+    list.push(o); keys.push([k, e.seq]);
+    if (list.length >= 500) break;
+  }
+  if (!list.length) return;
+  const batch = ++batchSeq;
+  batchKeys.set(batch, keys);
+  net.sendEdits(list, batch);
+  if (batchKeys.size > 400) { // socket is very unhealthy: forget the oldest
+    const oldest = batchKeys.keys().next().value;
+    batchKeys.delete(oldest);
+  }
+}
+
+function ackBatch(batch) {
+  const keys = batchKeys.get(batch);
+  if (!keys) return;
+  batchKeys.delete(batch);
+  for (const [k, seq] of keys) {
+    const cur = editOutbox.get(k);
+    if (cur && cur.seq === seq) editOutbox.delete(k); // newer edit for the same block? keep it
+  }
+}
+
+// position updates live on a timer (not the render loop) so a background tab
+// — where requestAnimationFrame is paused by the browser — still keeps the
+// player alive and visible for everyone else
+function mpSendPos(force = false) {
+  if (!mpSession || !net.online || (!started && !forceStarted)) return;
+  const p = player.pos;
+  const far = Math.abs(p.x - lastSentPos.x) > 40 || Math.abs(p.y - lastSentPos.y) > 40 || Math.abs(p.z - lastSentPos.z) > 40;
+  const jump = netJump || far; // legit teleport: the server must not reject it
+  lastSentPos.x = p.x; lastSentPos.y = p.y; lastSentPos.z = p.z;
+  netJump = false;
+  net.sendPos(p, player.yaw, player.pitch, mpArmor(), dim, {
+    jump, sneak: player.sneaking, sprint: player.sprinting,
+    fly: player.fly, ground: player.onGround, held: heldId() || 0,
+    swim: player.swimming, hp: player.dead ? 0 : Math.ceil(player.hp),
+  });
+}
+
+function setTimeOfDay(v) { // synced to the server in multiplayer
+  timeOfDay = ((v % 1) + 1) % 1;
+  if (mpSession && net.online) net.sendTime(timeOfDay);
+}
 
 function setWeather(mode, secs = 0, fromNet = false) {
   weatherMode = mode === 'rain' ? 'rain' : 'clear';
@@ -3720,16 +3831,41 @@ function setRenderDist(n) {
   savePrefs();
 }
 
-let tabListEl = null;
+let tabListEl = null, tabListShown = false, tabListRowsSig = '';
+function pingBars(ms) {
+  const n = !ms ? 0 : ms < 60 ? 5 : ms < 110 ? 4 : ms < 180 ? 3 : ms < 300 ? 2 : 1;
+  return '\u2582\u2584\u2586\u2588'.slice(0, n).padEnd(5, '\u2581');
+}
 function showTabList(show) {
   if (!tabListEl) tabListEl = document.getElementById('tabList');
   if (!tabListEl) return;
-  if (!show || !mpSession || !net.online) { tabListEl.classList.remove('show'); return; }
-  const esc = (s) => String(s).replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
-  const rows = [`${esc(net.name)} (you)${net.isOp() ? ' \u2605' : ''}`,
-    ...[...net.players.values()].map(q => `${esc(q.name)}${net.isOp(q.id) ? ' \u2605' : ''} \u00b7 ${esc(q.dim || 'overworld')}`)];
-  tabListEl.innerHTML = `<div class="tab-head">${rows.length} online</div>` + rows.map(r => `<div>${r}</div>`).join('');
+  tabListShown = !!show;
+  if (!tabListShown || !mpSession) { tabListEl.classList.remove('show'); return; }
+  renderTabList();
   tabListEl.classList.add('show');
+}
+function renderTabList(force = false) {
+  if (!tabListEl || !tabListShown || !mpSession) return;
+  const esc = (x) => String(x).replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+  const hearts = (q) => {
+    const hp = q.hp == null ? 20 : q.hp;
+    const full = Math.round(hp / 2);
+    return '\u2665'.repeat(Math.max(0, full)) + '\u2661'.repeat(Math.max(0, 10 - full));
+  };
+  const status = net.online ? 'online' : net.status;
+  const mine = [net.name + ' (you)' + (net.isOp() ? ' \u2605' : ''), pingBars(net.ping), hearts(player), '\u00b7 ' + status];
+  const others = [...net.players.values()].map(q => [
+    esc(q.name) + (net.isOp(q.id) ? ' \u2605' : ''),
+    pingBars(q.ping), hearts(q), '\u00b7 ' + esc(q.dim || 'overworld'),
+  ]);
+  const sig = JSON.stringify([mine, others]);
+  if (!force && sig === tabListRowsSig) return;
+  tabListRowsSig = sig;
+  const row = (cols, cls) => '<div class="' + (cls || '') + '">' + cols.map(c => '<span>' + c + '</span>').join('') + '</div>';
+  tabListEl.innerHTML =
+    `<div class="tab-head">${esc(net.server || 'server')} \u00b7 ${others.length + 1} online` +
+    `${net.online ? '' : ' \u00b7 ' + status}</div>` +
+    row(mine, 'tab-you') + others.map(o => row(o)).join('');
 }
 
 function relockPointer() {
@@ -3740,10 +3876,19 @@ function relockPointer() {
 
 function removeRemote(id) {
   const r = remoteModels.get(id);
-  if (r) { scene.remove(r.group); remoteModels.delete(id); }
+  if (!r) return;
+  scene.remove(r.group);
+  for (const o of r.group.children) {
+    if (o.isSprite && o.material) {
+      if (o.material.map) o.material.map.dispose();
+      o.material.dispose();
+    }
+  }
+  try { r.parts.dispose(); } catch (e) {}
+  remoteModels.delete(id);
 }
 
-function makeNameSprite(name) {
+function makeNameSprite(name, hue = 0) {
   const c = document.createElement('canvas');
   c.width = 256; c.height = 48;
   const g = c.getContext('2d');
@@ -3752,22 +3897,13 @@ function makeNameSprite(name) {
   g.fillStyle = 'rgba(0,0,0,0.55)';
   const w = Math.min(250, g.measureText(name).width + 24);
   g.fillRect(128 - w / 2, 4, w, 38);
-  g.fillStyle = '#ffffff';
+  g.fillStyle = `hsl(${hue}, 85%, 78%)`;
   g.fillText(name, 128, 32);
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false, transparent: true }));
   sp.scale.set(1.9, 0.36, 1);
   return sp;
 }
 
-// Flush edits made while the socket was connecting or temporarily offline.
-// The server snapshot remains authoritative; do not resend every local edit on
-// every reconnect, because an old browser cache could overwrite newer builds.
-function pushLocalEdits() {
-  if (!net.online || !pendingSets.length) return;
-  const rows = pendingSets.splice(0, pendingSets.length);
-  const list = rows.map(([d, x, y, z, id, f]) => ({ dim: d, x, y, z, id, f }));
-  if (!net.sendSets(list)) pendingSets.unshift(...rows);
-}
 
 // item mesh floating in a remote player's right hand
 function setRemoteHeld(r, id) {
@@ -3823,25 +3959,26 @@ function pasteStructure(key, bx, by, bz) {
 }
 
 function updateRemotes(dt) {
-  if (!mpSession || !net.online) return;
-  pushLocalEdits();
-  if (swingT < prevSwingT) net.sendAct('swing'); // our arm swung: tell everyone
-  prevSwingT = swingT;
-  netPosT -= dt;
-  if (netPosT <= 0) {
-    netPosT = 0.1;
-    net.sendPos(player.pos, player.yaw, player.pitch, mpArmor(), dim, netJump, player.sneaking, heldId() || 0, player.swimming ? 1 : 0);
-    netJump = false;
+  if (!mpSession) { if (remoteModels.size) for (const id of [...remoteModels.keys()]) removeRemote(id); return; }
+  if (net.online) {
+    flushOutbox();
+    if (swingT < prevSwingT) net.sendAct('swing'); // our arm swung: tell everyone
+    prevSwingT = swingT;
   }
+  // remote players are drawn even while we are offline (frozen in place) so
+  // the world does not visually reset during a reconnect blip
   for (const [id, p] of net.players) {
+    if (!Array.isArray(p.p)) continue; // no position yet (just joined)
     let r = remoteModels.get(id);
     if (!r) {
       const parts = buildPlayerModel();
-      const tag = makeNameSprite(p.name);
+      let hue = 0;
+      for (const ch of String(p.name || '')) hue = (hue * 31 + ch.codePointAt(0)) % 360;
+      const tag = makeNameSprite(p.name, hue);
       tag.position.y = 2.15;
       parts.group.add(tag);
       scene.add(parts.group);
-      r = { group: parts.group, parts, walkPhase: Math.random() * 6, swingT: 99, armorSig: '' };
+      r = { group: parts.group, parts, walkPhase: Math.random() * 6, swingT: 99, armorSig: '', heldSig: -1 };
       r.group.position.set(p.p[0], p.p[1], p.p[2]);
       remoteModels.set(id, r);
     }
@@ -3851,20 +3988,27 @@ function updateRemotes(dt) {
     const g = r.group.position;
     const dx = p.p[0] - g.x, dy = p.p[1] - g.y, dz = p.p[2] - g.z;
     const dist = Math.hypot(dx, dz);
-    if (Math.hypot(dx, dy, dz) > 30) g.set(p.p[0], p.p[1], p.p[2]); // teleport snap
-    else { const k = Math.min(1, dt * 10); g.x += dx * k; g.y += dy * k; g.z += dz * k; }
+    const far = Math.hypot(dx, dy, dz);
+    // snap on real teleports (respawn, portals, /tp) instead of gliding there
+    if (p.tp || far > 30) { g.set(p.p[0], p.p[1], p.p[2]); p.tp = 0; }
+    else { const k = Math.min(1, dt * 12); g.x += dx * k; g.y += dy * k; g.z += dz * k; }
     r.group.rotation.y = p.yaw || 0;
     r.parts.head.rotation.x = THREE.MathUtils.clamp(-(p.pitch || 0), -1.1, 1.1) * 0.85;
     const speed = dist / Math.max(dt, 1e-3);
     r.walkPhase += dt * (2 + Math.min(8, speed) * 1.6);
     r.swingT += dt;
+    const air = sameDim && p.ground === 0 && speed > 1.5;
     posePlayer(r.parts, r.walkPhase, Math.min(1, speed / 4), r.swingT, !!p.sneak, {
-      run: speed > 5 ? 1 : 0, swim: p.swim ? 1 : 0, t: performance.now() / 1000,
+      run: (speed > 5 ? 1 : 0) + (p.sprint ? 1 : 0) > 1 ? 1 : (p.sprint ? 1 : 0),
+      swim: p.swim ? 1 : 0, fly: !!p.fly, air, t: performance.now() / 1000,
     });
     const sig = (p.armor || []).join(',');
     if (sig !== r.armorSig) { r.armorSig = sig; r.parts.setArmor(p.armor || [null, null, null, null]); }
     const hsig = p.held | 0;
     if (hsig !== r.heldSig) { r.heldSig = hsig; setRemoteHeld(r, hsig); }
+    // name tags fade out with distance so a busy server stays readable
+    const tag = r.group.children.find(o => o.isSprite);
+    if (tag) tag.material.opacity = far > 48 ? 0 : (far > 32 ? (48 - far) / 16 : 1);
   }
   for (const id of [...remoteModels.keys()]) {
     if (!net.players.has(id)) removeRemote(id);
@@ -3904,7 +4048,7 @@ initChat({
   getDim: () => dim,
   dims, worldOver,
   getTime: () => timeOfDay,
-  setTime: (v) => { timeOfDay = v; if (mpSession && net.online) net.sendTime(v); },
+  setTime: (v) => setTimeOfDay(v),
   setRenderDist, getRenderDist: () => renderDist,
   setWeather: (m, s) => setWeather(m, s),
   getWeather: () => weatherMode,
@@ -3912,64 +4056,64 @@ initChat({
   net, cycleCamera, toast, sfx,
   myName: () => (mpSession ? net.name : 'you'),
   isMP: () => !!mpSession,
-  disconnectMP: () => { save(); try { sessionStorage.removeItem('webcraft_mp'); } catch (e) {} location.reload(); },
+  disconnectMP: () => { save(); try { net.disconnect(); } catch (e) {} try { sessionStorage.removeItem('webcraft_mp'); } catch (e) {} location.reload(); },
   afterTeleport, afterEdit,
   relock: relockPointer,
 });
 
 for (const w of [worldOver, worldNether, worldEnd]) { w.onRedstoneAction = dispatchRedstone; w._rsNow = 0; }
 
-let mpReconnectTimer = 0;
-let mpReconnectAttempt = 0;
-
-function persistMPSession(m) {
-  if (!mpSession) return;
-  if (m && m.token) mpSession.token = m.token;
-  if (m && Number.isInteger(m.seed)) mpSession.seed = m.seed | 0;
-  try { sessionStorage.setItem('webcraft_mp', JSON.stringify(mpSession)); } catch (e) {}
-}
-
-function scheduleMPReconnect() {
-  if (!mpSession || mpReconnectTimer || net.intentional) return;
-  const delay = Math.min(15000, 1000 * (2 ** Math.min(mpReconnectAttempt++, 4)));
-  mpReconnectTimer = setTimeout(() => {
-    mpReconnectTimer = 0;
-    if (mpSession && !net.online && !net.connecting) connectActiveMP();
-  }, delay);
-}
-
-function connectActiveMP() {
-  if (!mpSession || net.online || net.connecting) return;
-  for (const id of [...remoteModels.keys()]) removeRemote(id);
+let mpJoinedOnce = false;
+if (mpSession) {
+  for (const w of [worldOver, worldNether, worldEnd]) {
+    w.onEdit = (x, y, z, id) => {
+      const f = w._rsData ? (w._rsData.get(x + ',' + y + ',' + z) || {}).f : undefined;
+      queueEdit(w.dim, x, y, z, id, Number.isInteger(f) && f >= 0 ? f : undefined);
+    };
+  }
+  // edits that never reached the server (offline session / dropped socket)
+  // are restored and pushed again as soon as we are online
+  outboxLoad(saved && saved.mpOutbox);
   net.connect(mpSession.addr, mpSession.name, {
-    token: mpSession.token || '',
     getPos: () => [player.pos.x, player.pos.y, player.pos.z],
     getYaw: () => player.yaw,
     getPitch: () => player.pitch,
     getDim: () => dim,
     getArmor: mpArmor,
-    getHeld: () => heldId() || 0,
-    getSwim: () => player.swimming ? 1 : 0,
+    getHp: () => (player.dead ? 0 : Math.ceil(player.hp)),
     onWelcome: (m) => {
       if ((m.seed | 0) !== (mpSession.seed | 0)) {
-        persistMPSession(m);
+        mpSession.seed = m.seed | 0;
+        try { sessionStorage.setItem('webcraft_mp', JSON.stringify(mpSession)); } catch (e) {}
         try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
-        net.disconnect(false);
         location.reload();
         return;
       }
-      persistMPSession(m);
-      mpReconnectAttempt = 0;
-      if (mpReconnectTimer) { clearTimeout(mpReconnectTimer); mpReconnectTimer = 0; }
-      toast(`Connected to ${m.server || 'server'} as ${m.name}`, 3);
-      chatSys(`Connected to ${m.server || 'server'} — ${(m.players || []).length + 1} online`);
+      if (m.name && m.name !== mpSession.name) {
+        // the server renamed us (nickname already taken / not allowed chars)
+        mpSession.name = m.name;
+        try { sessionStorage.setItem('webcraft_mp', JSON.stringify(mpSession)); } catch (e) {}
+      }
+      const first = !mpJoinedOnce;
+      mpJoinedOnce = true;
+      toast(first ? `Connected to ${m.server || 'server'} as ${m.name}` : `Reconnected to ${m.server || 'server'}`, 3);
+      chatSys(`Connected to ${m.server || 'server'} — ${m.players.length + 1} online as ${m.name}`);
       setWeather(m.weather === 'rain' ? 'rain' : 'clear', 0, true);
       if (typeof m.time === 'number') timeOfDay = m.time;
+      flushOutbox(true);
+      mpSendPos(true);
     },
-    onSynced: () => pushLocalEdits(),
-    onJoin: () => {},
+    onStatus: (st) => {
+      if (st === 'reconnecting') chatSys('Connection lost — reconnecting…');
+      tabListRowsSig = '';
+    },
+    onOpen: () => { flushOutbox(true); mpSendPos(true); },
+    onSynced: () => { flushOutbox(true); },
+    onAck: (batch) => ackBatch(batch),
+    onPlayers: () => { tabListRowsSig = ''; },
     onLeave: (id) => removeRemote(id),
     onChat: (from, text) => chatMessage(`<${from}> ${text}`),
+    onMe: (from, text) => chatMessage(`* ${from} ${text}`, '#d0d0d0'),
     onTell: (from, text) => chatMessage(`[${from} \u2192 you] ${text}`, '#f0a0f0'),
     onSys: (text) => chatMessage(text, '#ffff55'),
     onSets: (list) => {
@@ -3977,11 +4121,10 @@ function connectActiveMP() {
       for (const w of worlds) w._muteEdit = true;
       try {
         for (const s of list) {
-          if (!s || !Number.isInteger(s.x) || !Number.isInteger(s.y) || !Number.isInteger(s.z)
-            || !Number.isInteger(s.id) || !BLOCKS[s.id]) continue;
           const w = s.dim === 'nether' ? worldNether : s.dim === 'end' ? worldEnd : worldOver;
-          if (w.applyRemoteEdit) w.applyRemoteEdit(s.x, s.y, s.z, s.id);
-          else w.setBlock(s.x, s.y, s.z, s.id);
+          // applyRemoteEdit also stores edits for chunks that are not loaded yet,
+          // otherwise a friend's build (or the join snapshot) is lost until reload
+          w.applyRemoteEdit(s.x, s.y, s.z, s.id);
           if (Number.isInteger(s.f) && s.f >= 0 && s.f <= 5) {
             if (!w._rsData) w._rsData = new Map();
             const k = s.x + ',' + s.y + ',' + s.z;
@@ -3996,44 +4139,41 @@ function connectActiveMP() {
     },
     onTime: (t) => { if (Math.abs(t - timeOfDay) > 0.004) timeOfDay = t; },
     onWeather: (mode) => setWeather(mode, 0, true),
-    onOps: () => {},
     onAct: (id, act) => { const r = remoteModels.get(id); if (r && act === 'swing') r.swingT = 0; },
     onDrop: (m) => {
       if (!m || !ITEMS[m.id]) return;
-      if (m.dim && m.dim !== dim) return;
       if (![m.x, m.y, m.z].every(Number.isFinite)) return;
       const es = drops.spawn(m.id, Math.max(1, Math.min(64, m.n | 0)), m.x, m.y, m.z, { stack: true, ttl: 90, dmg: m.dmg | 0, nid: String(m.nid || ''), tag: m.tag || null });
       if (es && es[0]) es[0].vel = { x: +m.vx || 0, y: (+m.vy || 0) + 1, z: +m.vz || 0 };
     },
     onGone: (nid) => drops.removeByNid(nid),
     onKick: (reason) => {
-      if (mpReconnectTimer) { clearTimeout(mpReconnectTimer); mpReconnectTimer = 0; }
       toast('Kicked: ' + reason, 4);
+      chatErr('Kicked: ' + reason);
     },
-    onError: () => scheduleMPReconnect(),
-    onClose: () => {
-      toast('Disconnected from server — reconnecting…', 3);
-      chatSys('Disconnected from server; reconnecting automatically');
+    onError: () => chatSys('Server unreachable — retrying…'),
+    onClose: (why) => {
+      if (why) { toast('Disconnected from server', 3); chatSys('Disconnected from server'); }
       for (const id of [...remoteModels.keys()]) removeRemote(id);
-      scheduleMPReconnect();
+      tabListRowsSig = '';
     },
   });
-}
 
-if (mpSession) {
-  for (const w of [worldOver, worldNether, worldEnd]) {
-    w.onEdit = (x, y, z, id) => {
-      const f = w._rsData ? (w._rsData.get(x + ',' + y + ',' + z) || {}).f : undefined;
-      // Keep a bounded journal while connecting/offline; updateRemotes flushes
-      // it as soon as the socket is ready.
-      if (pendingSets.length < 20000) pendingSets.push([w.dim, x, y, z, id, f]);
-    };
-  }
-  connectActiveMP();
+  // keep the position flowing even when the tab is in the background (the
+  // browser pauses requestAnimationFrame there, which used to look like a
+  // frozen/absent player for everyone else, and eventually timed players out)
+  setInterval(() => { if (!document.hidden) mpSendPos(); }, 100);
+  setInterval(() => { if (document.hidden) mpSendPos(); net.pingTick(); }, 1000);
+  document.addEventListener('visibilitychange', () => {
+    net.setBackground(document.hidden);
+    if (!document.hidden) { mpSendPos(true); if (!net.online && net.status === 'reconnecting') net.connect(net.addr, net.name, net.ev); }
+  });
 }
 
 // ---------------------------------------------------------------------------
 // Debug hooks (used by automated tests; harmless in production)
+
+
 
 window.__game = {
   world, player, mobs, camera, renderer, particles, keys, inventory, drops, furnaces,
@@ -4052,7 +4192,7 @@ window.__game = {
     return hit;
   },
   openInventory, closeInventory, matchGrid,
-  I, ITEMS, RECIPES,
+  I, ITEMS, RECIPES, B, BLOCKS,
   setCraftCells: (cells) => {
     inventory.craft = cells.slice(0, 9).map(id => (id == null ? null : { id, n: 1 }));
     while (inventory.craft.length < 9) inventory.craft.push(null);
@@ -4070,6 +4210,18 @@ window.__game = {
   setGameMode: (m) => applyGameMode(m, { silent: true }),
   cycleCamera, getCamMode: () => camMode,
   chat: submitChat, net, setWeather, isMP,
+  // multiplayer introspection (used by the automated tests)
+  mpState: () => ({
+    isMP: !!mpSession, online: net.online, status: net.status, ping: net.ping,
+    myId: net.myId, name: net.name, server: net.server, seed: net.seed,
+    players: [...net.players.values()].map(q => ({ id: q.id, name: q.name, dim: q.dim, p: q.p, hp: q.hp })),
+    remotes: [...remoteModels.entries()].map(([id, r]) => ({
+      id, visible: r.group.visible, inScene: !!r.group.parent,
+      pos: [+r.group.position.x.toFixed(2), +r.group.position.y.toFixed(2), +r.group.position.z.toFixed(2)],
+    })),
+    outbox: editOutbox.size, tabOpen: tabListShown,
+  }),
+  showTabList,
   getGameMode: () => player.gameMode,
   getDim: () => dim,
   switchDimension, setDimension, tryLightPortal, dims,
@@ -4086,3 +4238,6 @@ window.__game = {
   setBreaking: (v) => { breakingHeld = v; },
   step: (dt = 0.05, n = 1) => { for (let i = 0; i < n; i++) frame(dt); },
 };
+
+// everything is declared now — start the render/simulation loop
+animate();

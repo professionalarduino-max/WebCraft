@@ -13,8 +13,8 @@ let histIdx = -1;
 
 export const COMMANDS = [
   'help', 'gamemode', 'give', 'tp', 'spawn', 'time', 'kill', 'heal', 'clear',
-  'fly', 'seed', 'me', 'list', 'tell', 'summon', 'setblock', 'weather',
-  'rd', 'locate', 'op', 'kick', 'cam', 'disconnect',
+  'fly', 'seed', 'me', 'list', 'players', 'ping', 'tell', 'msg', 'w', 'summon',
+  'setblock', 'weather', 'rd', 'locate', 'op', 'kick', 'cam', 'disconnect', 'leave',
 ];
 
 const VALID_MOBS = ['pig', 'sheep', 'cow', 'chicken', 'zombie', 'spider', 'skeleton', 'slime', 'slime_small', 'creeper', 'enderman', 'blaze'];
@@ -134,7 +134,8 @@ function runCommand(cmd, args) {
       chatSys('/gamemode <s|c> · /give <item> [n] · /tp <x y z|player> · /spawn');
       chatSys('/time set <day|noon|night|midnight|ticks> · /weather <clear|rain> · /kill · /heal · /clear · /fly');
       chatSys('/summon <mob> [n] · /setblock <x y z> <id> · /locate <stronghold|village> · /rd <2-8> · /seed');
-      chatSys('/me · /list · /tell <player> · /op · /kick · /cam · /disconnect — Tab completes, ↑↓ history');
+      chatSys('/me <emote> · /list · /ping · /tell <player> <msg> · /op · /kick · /cam · /disconnect');
+      chatSys('Multiplayer: avatars, Tab player list, shared blocks & chests, world chat — Tab completes, ↑↓ history');
       break;
     case 'gamemode': case 'gm': {
       const a = (args[0] || '').toLowerCase();
@@ -215,14 +216,25 @@ function runCommand(cmd, args) {
     case 'me': {
       const text = args.join(' ');
       if (!text) throw new Error('usage: /me <action>');
-      if (game.isMP() && game.net.online) game.net.sendChat(`* ${text}`);
+      if (game.isMP() && game.net.online) game.net.sendMe(text);
       else chatMessage(`* ${game.myName()} ${text}`, '#e0e0e0');
       break;
     }
-    case 'list': {
+    case 'list': case 'players': {
       needMP();
-      const names = [game.net.name + ' (you)', ...[...game.net.players.values()].map(q => q.name + (game.net.isOp(q.id) ? ' ★' : ''))];
-      chatSys(`${names.length} online: ${names.join(', ')}`);
+      const me = `${game.net.name} (you) ${game.net.ping ? game.net.ping + 'ms' : ''}`;
+      const rows = [...game.net.players.values()].map(q => {
+        const where = q.dim && q.dim !== game.getDim() ? ` [${q.dim}]` : '';
+        return `${q.name}${game.net.isOp(q.id) ? ' ★' : ''}${where}`;
+      });
+      chatSys(`${rows.length + 1} online on ${game.net.server || 'server'}: ${[me, ...rows].join(', ')}`);
+      break;
+    }
+    case 'ping': {
+      if (!game.isMP()) { chatSys('Singleplayer — no connection'); break; }
+      chatSys(game.net.online
+        ? `Ping to ${game.net.server || game.net.addr}: ${game.net.ping || '…'} ms (status: ${game.net.status})`
+        : `Not connected to the server (status: ${game.net.status})`);
       break;
     }
     case 'tell': case 'msg': case 'w': {

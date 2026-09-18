@@ -8,7 +8,9 @@
 // in a browser to play, the client joins MP on the same host/port over
 // WebSocket (/ws). Block edits, chat,
 // player positions and the time of day are relayed; block deltas persist
-// to server/db.json so the shared world survives restarts.
+// to server/db.json so the shared world survives restarts. Short-lived session
+// tokens let a browser refresh reclaim the same player instead of creating a
+// duplicate ghost entry.
 
 const http = require('http');
 const crypto = require('crypto');
@@ -28,21 +30,32 @@ const DAY_LEN = 300; // must match client's DAY_LEN
 const DB_PATH = path.join(__dirname, 'db.json');
 const MAX_DELTAS = 20000;
 const MAX_MSG = 64 * 1024;
+const MAX_PLAYERS = 64;
 
 // ---------------------------------------------------------------------------
 // State
 
 const players = new Map(); // id -> player record
+const sessions = new Map(); // token -> last state during fast reconnects
+const onlineCount = () => [...players.values()].filter(p => p.hello).length;
 let nextId = 1;
 const deltas = new Map();  // "dim:x,y,z" -> {dim,x,y,z,id}
 const ops = new Set();     // operator names (lowercase)
+let dirty = false;         // declared before CLI ops are applied
 let timeOfDay = 0.28;
 let weather = 'clear'; // 'clear' | 'rain'
 
 try {
   const db = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
-  for (const d of db.deltas || []) deltas.set(`${d.dim}:${d.x},${d.y},${d.z}`, d);
-  for (const n of db.ops || []) ops.add(String(n).toLowerCase());
+  for (const d of db.deltas || []) {
+    if (!d || !Number.isInteger(d.x) || !Number.isInteger(d.y) || !Number.isInteger(d.z) || !Number.isInteger(d.id)) continue;
+    const dim = d.dim === 'nether' || d.dim === 'end' ? d.dim : 'overworld';
+    deltas.set(`${dim}:${d.x},${d.y},${d.z}`, { dim, x: d.x, y: d.y, z: d.z, id: d.id, ...(Number.isInteger(d.f) ? { f: d.f } : {}) });
+  }
+  for (const n of db.ops || []) {
+    const name = String(n).toLowerCase();
+    if (name) ops.add(name);
+  }
   if (SEED === null && Number.isInteger(db.seed)) SEED = db.seed | 0;
   if (typeof db.time === 'number') timeOfDay = ((db.time % 1) + 1) % 1;
   if (db.weather === 'rain' || db.weather === 'clear') weather = db.weather;
@@ -52,14 +65,20 @@ for (const n of String(arg('--op', '')).split(',').map(s => s.trim().toLowerCase
   if (!ops.has(n)) { ops.add(n); dirty = true; console.log(`[mp] op granted: ${n}`); }
 }
 if (SEED === null) SEED = (Math.random() * 0xffffffff) | 0;
-
-let dirty = false;
 function saveDb() {
   if (!dirty) return;
-  dirty = false;
+  const tmp = DB_PATH + '.tmp';
   try {
-    fs.writeFileSync(DB_PATH, JSON.stringify({ deltas: [...deltas.values()], ops: [...ops], time: timeOfDay, weather, seed: SEED }));
-  } catch (e) { console.log('[mp] db write failed:', e.message); }
+    const data = JSON.stringify({ deltas: [...deltas.values()], ops: [...ops], time: timeOfDay, weather, seed: SEED });
+    // Rename is atomic on the local filesystem, so a power loss cannot leave
+    // db.json half-written and make the next server start lose the world.
+    fs.writeFileSync(tmp, data);
+    fs.renameSync(tmp, DB_PATH);
+    dirty = false;
+  } catch (e) {
+    try { fs.unlinkSync(tmp); } catch (_) {}
+    console.log('[mp] db write failed:', e.message);
+  }
 }
 setInterval(saveDb, 10000); // frequent autosave: builds survive even a hard kill
 const shutdown = () => { dirty = true; saveDb(); process.exit(0); };
@@ -135,13 +154,23 @@ function attachParser(sock, onMsg, onClose) {
 
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 const clampNum = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-const cleanName = (v) => String(v || '').replace(/[^A-Za-z0-9_]/g, '').slice(0, 16);
+const cleanName = (v) => String(v || '')
+  .normalize('NFKC')
+  .replace(/[^\p{L}\p{N}\u005F-]/gu, '')
+  .slice(0, 16);
 const cleanText = (v) => String(v ?? '').slice(0, 256);
 const cleanDim = (v) => (v === 'nether' || v === 'end' ? v : 'overworld');
+const cleanToken = (v) => {
+  const token = String(v || '');
+  return /^[a-f0-9]{32,128}$/i.test(token) ? token.toLowerCase() : '';
+};
+function newToken() { return crypto.randomBytes(32).toString('hex'); }
 
-function uniqueName(want) {
+function uniqueName(want, ignoreId = -1) {
   want = cleanName(want) || 'Steve';
-  const taken = new Set([...players.values()].map(p => p.name.toLowerCase()));
+  const taken = new Set([...players.values()]
+    .filter(p => p.id !== ignoreId && p.hello)
+    .map(p => p.name.toLowerCase()));
   if (!taken.has(want.toLowerCase())) return want;
   for (let i = 2; i < 100; i++) {
     if (!taken.has((want + i).toLowerCase())) return want + i;
@@ -180,6 +209,42 @@ function broadcast(msg, exceptId = -1) {
 
 function sysTo(p, text) { sendText(p.sock, JSON.stringify({ t: 'sys', text })); }
 
+function playerSnapshot(p) {
+  const armor = [null, null, null, null];
+  for (let i = 0; i < 4; i++) armor[i] = typeof p.armor?.[i] === 'string' ? p.armor[i].slice(0, 16) : null;
+  return {
+    id: p.id, name: p.name, p: [...p.pos], yaw: p.yaw, pitch: p.pitch,
+    armor, dim: p.dim, held: p.held | 0, swim: p.swim ? 1 : 0,
+  };
+}
+
+function saveSession(p) {
+  if (!p || !p.hello || !p.token) return;
+  // Session tokens only live in a browser session. Keeping the last state in
+  // memory lets a fast page reload reclaim the same name without creating a
+  // second ghost player while the old TCP socket is closing.
+  const state = {
+    token: p.token, name: p.name, pos: [...p.pos], yaw: p.yaw, pitch: p.pitch,
+    armor: p.armor.slice(0, 4), dim: p.dim, held: p.held | 0, op: !!p.op,
+    updated: Date.now(),
+  };
+  sessions.set(p.token, state);
+  // Bound memory if a client keeps opening new tabs for a long time.
+  if (sessions.size > MAX_PLAYERS * 4) {
+    const oldest = [...sessions.values()].sort((a, b) => a.updated - b.updated)[0];
+    if (oldest) sessions.delete(oldest.token);
+  }
+}
+
+function closeReplaced(p) {
+  if (!p || !players.has(p.id)) return;
+  try { sendText(p.sock, JSON.stringify({ t: 'kick', reason: 'Session resumed in another tab' })); } catch (e) {}
+  // Do not wait for the browser's close event: a reload can leave the old
+  // socket around for a moment and otherwise it can hide the freshly joined
+  // player from the presence list.
+  setTimeout(() => { try { p.sock.destroy(); } catch (e) {} }, 100);
+}
+
 // ---------------------------------------------------------------------------
 // Message handling
 
@@ -192,35 +257,62 @@ function onMessage(p, raw) {
   switch (m.t) {
     case 'hello': {
       if (p.hello) return;
-      p.hello = true;
-      p.name = uniqueName(m.name);
-      if (Array.isArray(m.p) && m.p.length >= 3 && m.p.every(isNum)) {
-        p.pos = [clampNum(m.p[0], -3e7, 3e7), clampNum(m.p[1], -64, 512), clampNum(m.p[2], -3e7, 3e7)];
+      if (onlineCount() >= MAX_PLAYERS) {
+        sendText(p.sock, JSON.stringify({ t: 'kick', reason: 'Server is full' }));
+        try { p.sock.destroy(); } catch (e) {}
+        return;
       }
-      p.yaw = isNum(m.yaw) ? m.yaw : 0;
-      p.dim = cleanDim(m.dim);
+
+      const requestedToken = cleanToken(m.token);
+      const activeSession = requestedToken
+        ? [...players.values()].find(q => q.token === requestedToken && q.id !== p.id)
+        : null;
+      const resumed = (requestedToken ? sessions.get(requestedToken) : null) || activeSession;
+      if (activeSession) {
+        closeReplaced(activeSession);
+        onDisconnect(activeSession, p.id);
+      }
+
+      p.hello = true;
+      p.token = requestedToken || newToken();
+      p.name = resumed?.name || uniqueName(m.name);
+      if (Array.isArray(m.p) && m.p.length >= 3 && m.p.slice(0, 3).every(isNum)) {
+        p.pos = [clampNum(m.p[0], -3e7, 3e7), clampNum(m.p[1], -64, 512), clampNum(m.p[2], -3e7, 3e7)];
+      } else if (resumed && Array.isArray(resumed.pos)) {
+        p.pos = [...resumed.pos];
+      }
+      p.yaw = isNum(m.yaw) ? m.yaw : (resumed?.yaw || 0);
+      p.pitch = isNum(m.pitch) ? m.pitch : (resumed?.pitch || 0);
+      p.dim = cleanDim(m.dim || resumed?.dim);
       if (Array.isArray(m.armor)) p.armor = m.armor.slice(0, 4).map(a => (typeof a === 'string' ? a.slice(0, 16) : null));
+      else if (resumed?.armor) p.armor = resumed.armor.slice(0, 4);
+      if (Number.isInteger(m.held) && m.held >= 0 && m.held <= 500) p.held = m.held;
+      else p.held = resumed?.held | 0;
+      p.swim = m.swim ? 1 : 0;
       // first player on an empty server becomes operator
-      if (players.size === 1 && ops.size === 0) {
+      if (onlineCount() === 1 && ops.size === 0) {
         ops.add(p.name.toLowerCase());
         dirty = true;
       }
-      p.op = ops.has(p.name.toLowerCase());
-      const others = [...players.values()].filter(q => q.id !== p.id)
-        .map(q => ({ id: q.id, name: q.name, p: q.pos, yaw: q.yaw, pitch: q.pitch, armor: q.armor, dim: q.dim, held: q.held || 0, swim: 0 }));
-      // welcome may be huge (deltas) — send it in chunks
+      p.op = ops.has(p.name.toLowerCase()) || !!resumed?.op;
+      if (p.op && !ops.has(p.name.toLowerCase())) { ops.add(p.name.toLowerCase()); dirty = true; }
+      const others = [...players.values()].filter(q => q.id !== p.id && q.hello).map(playerSnapshot);
+      // welcome may be large (deltas) — send it in chunks. The complete
+      // self snapshot also gives a reconnecting client a stable baseline.
       sendText(p.sock, JSON.stringify({
-        t: 'welcome', you: p.id, name: p.name, seed: SEED, time: timeOfDay, weather,
-        server: SERVER_NAME, players: others, op: p.op, ops: [...players.values()].filter(q => q.op).map(q => q.id),
+        t: 'welcome', you: p.id, token: p.token, self: playerSnapshot(p),
+        name: p.name, seed: SEED, time: timeOfDay, weather,
+        server: SERVER_NAME, players: others, op: p.op,
+        ops: [...players.values()].filter(q => q.hello && q.op).map(q => q.id),
       }));
       const all = [...deltas.values()];
       for (let i = 0; i < all.length; i += 800) {
         sendText(p.sock, JSON.stringify({ t: 'sets', list: all.slice(i, i + 800) }));
       }
       sendText(p.sock, JSON.stringify({ t: 'synced' }));
-      broadcast({ t: 'join', id: p.id, name: p.name, p: p.pos, yaw: p.yaw, pitch: p.pitch, armor: p.armor, dim: p.dim, held: 0, swim: 0 }, p.id);
+      broadcast({ t: 'join', ...playerSnapshot(p) }, p.id);
       broadcast({ t: 'sys', text: `${p.name} joined the game` });
-      console.log(`[mp] ${p.name} joined (${players.size} online)`);
+      console.log(`[mp] ${p.name} joined (${onlineCount()} online)`);
       break;
     }
     case 'pos': {
@@ -237,7 +329,9 @@ function onMessage(p, raw) {
       p.dim = cleanDim(m.dim);
       if (Array.isArray(m.armor)) p.armor = m.armor.slice(0, 4).map(a => (typeof a === 'string' ? a.slice(0, 16) : null));
       if (Number.isInteger(m.held) && m.held >= 0 && m.held <= 500) p.held = m.held;
-      broadcast({ t: 'pos', id: p.id, p: p.pos, yaw: p.yaw, pitch: p.pitch, armor: p.armor, dim: p.dim, sneak: m.sneak ? 1 : 0, held: p.held, swim: m.swim ? 1 : 0 }, p.id);
+      p.swim = m.swim ? 1 : 0;
+      broadcast({ t: 'pos', id: p.id, name: p.name, p: [...p.pos], yaw: p.yaw, pitch: p.pitch,
+        armor: p.armor, dim: p.dim, sneak: m.sneak ? 1 : 0, held: p.held, swim: p.swim }, p.id);
       break;
     }
     case 'chat': {
@@ -264,7 +358,9 @@ function onMessage(p, raw) {
       const clean = [];
       for (const s of list) {
         if (!s || !Number.isInteger(s.x) || !Number.isInteger(s.y) || !Number.isInteger(s.z) || !Number.isInteger(s.id)) continue;
-        if (Math.abs(s.x) > 3e7 || Math.abs(s.z) > 3e7 || s.y < 0 || s.y > 255 || s.id < 0 || s.id > 500) continue;
+        // block ids occupy the 0..199 range; item ids must never be written
+        // into terrain because clients index BLOCKS[id] while meshing.
+        if (Math.abs(s.x) > 3e7 || Math.abs(s.z) > 3e7 || s.y < 0 || s.y > 79 || s.id < 0 || s.id > 199) continue;
         const dim = cleanDim(s.dim);
         const e = { dim, x: s.x, y: s.y, z: s.z, id: s.id };
         if (Number.isInteger(s.f) && s.f >= 0 && s.f <= 5) e.f = s.f; // machine facing sync
@@ -335,7 +431,7 @@ function onMessage(p, raw) {
       if (!Number.isInteger(m.n) || m.n < 1 || m.n > 64) return;
       if (![m.x, m.y, m.z, m.vx, m.vy, m.vz].every(isNum)) return;
       if (Math.abs(m.x) > 3e7 || Math.abs(m.z) > 3e7 || m.y < -64 || m.y > 512) return;
-      broadcast({ t: 'drop', from: p.id, nid, id: m.id, n: m.n,
+      broadcast({ t: 'drop', from: p.id, dim: p.dim, nid, id: m.id, n: m.n,
         x: m.x, y: m.y, z: m.z, vx: m.vx, vy: m.vy, vz: m.vz, dmg: Number.isInteger(m.dmg) ? m.dmg : 0, tag: cleanTag(m.tag) }, p.id);
       break;
     }
@@ -352,13 +448,14 @@ function onMessage(p, raw) {
   }
 }
 
-function onDisconnect(p) {
+function onDisconnect(p, exceptId = -1) {
   if (!players.has(p.id)) return;
+  if (p.hello) saveSession(p);
   players.delete(p.id);
   if (p.hello) {
-    broadcast({ t: 'leave', id: p.id });
-    broadcast({ t: 'sys', text: `${p.name} left the game` });
-    console.log(`[mp] ${p.name} left (${players.size} online)`);
+    broadcast({ t: 'leave', id: p.id }, exceptId);
+    broadcast({ t: 'sys', text: `${p.name} left the game` }, exceptId);
+    console.log(`[mp] ${p.name} left (${onlineCount()} online)`);
     saveDb(); // someone leaving flushes the world to disk
   }
 }
@@ -399,9 +496,10 @@ function serveStatic(req, res) {
 const server = http.createServer((req, res) => {
   if (req.url.split('?')[0] === '/status') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
+    const online = [...players.values()].filter(p => p.hello);
     res.end(JSON.stringify({
       name: SERVER_NAME, game: 'webcraft', seed: SEED >>> 0,
-      online: players.size, players: [...players.values()].map(p => p.name),
+      online: online.length, players: online.map(p => p.name),
     }));
     return;
   }
@@ -409,6 +507,8 @@ const server = http.createServer((req, res) => {
 });
 
 server.on('upgrade', (req, sock) => {
+  if (req.url && req.url.split('?')[0] !== '/ws') { sock.destroy(); return; }
+  if (players.size >= MAX_PLAYERS * 2) { sock.destroy(); return; }
   const key = req.headers['sec-websocket-key'];
   if (!key) { sock.destroy(); return; }
   const accept = crypto.createHash('sha1').update(key + WS_GUID).digest('base64');
@@ -418,8 +518,8 @@ server.on('upgrade', (req, sock) => {
     `Sec-WebSocket-Accept: ${accept}\r\n\r\n`
   );
   const p = {
-    id: nextId++, sock, name: '', hello: false,
-    pos: [0, 80, 0], yaw: 0, pitch: 0, armor: [null, null, null, null], dim: 'overworld', held: 0,
+    id: nextId++, sock, name: '', token: '', hello: false,
+    pos: [0, 80, 0], yaw: 0, pitch: 0, armor: [null, null, null, null], dim: 'overworld', held: 0, swim: 0,
     op: false, rl: {}, lastSeen: Date.now(),
   };
   players.set(p.id, p);
@@ -434,9 +534,16 @@ setInterval(() => {
   lastTick = now;
   broadcast({ t: 'time', time: timeOfDay });
   dirty = true;
+  const roster = [...players.values()].filter(p => p.hello).map(playerSnapshot);
   for (const p of [...players.values()]) {
     if (now - p.lastSeen > 90000) { try { p.sock.destroy(); } catch (e) {} continue; }
     sendPing(p.sock);
+    // Reliable WebSockets normally deliver join/leave packets in order, but a
+    // periodic roster heals a tab that missed a lifecycle event during a fast
+    // refresh and is the final guard against invisible rejoined players.
+    sendText(p.sock, JSON.stringify({
+      t: 'snapshot', players: roster.filter(q => q.id !== p.id),
+    }));
   }
 }, 5000);
 

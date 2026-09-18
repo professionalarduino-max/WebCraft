@@ -500,7 +500,7 @@ export class World {
   }
 
   setBlock(x, y, z, id) {
-    if (y < 0 || y >= HEIGHT) return false;
+    if (!BLOCKS[id] || y < 0 || y >= HEIGHT) return false;
     const cx = Math.floor(x / CHUNK), cz = Math.floor(z / CHUNK);
     const c = this.chunks.get(key(cx, cz));
     if (!c) return false;
@@ -530,6 +530,31 @@ export class World {
       if (acts && acts.length && this.onRedstoneAction) for (const a of acts) { a.dim = this.dim; try { this.onRedstoneAction(a); } catch (e) {} }
     }
     return true;
+  }
+
+  // Apply a server edit even when its chunk is not currently loaded. The old
+  // multiplayer code called setBlock directly and silently lost edits sent for
+  // distant chunks; those chunks were regenerated from the seed when a player
+  // later walked there. Keeping the edit map first makes the server snapshot
+  // authoritative across reconnects and render-distance boundaries.
+  applyRemoteEdit(x, y, z, id) {
+    if (!BLOCKS[id] || !Number.isInteger(x) || !Number.isInteger(y) || !Number.isInteger(z)
+      || !Number.isInteger(id) || y < 0 || y >= HEIGHT) return false;
+    const cx = Math.floor(x / CHUNK), cz = Math.floor(z / CHUNK);
+    const lx = x - cx * CHUNK, lz = z - cz * CHUNK;
+    const ck = key(cx, cz);
+    const lk = lx + ',' + y + ',' + lz;
+    const c = this.chunks.get(ck);
+    if (!c) {
+      let ce = this.edits.get(ck);
+      if (!ce) { ce = new Map(); this.edits.set(ck, ce); }
+      ce.set(lk, id);
+      return true;
+    }
+    const oldMute = this._muteEdit;
+    this._muteEdit = true;
+    try { return this.setBlock(x, y, z, id); }
+    finally { this._muteEdit = oldMute; }
   }
 
   // liquid flow bookkeeping: fresh liquid is a full-strength source;

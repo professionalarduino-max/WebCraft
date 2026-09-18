@@ -33,7 +33,10 @@ A 3D Minecraft clone that runs entirely in the browser. No build step, no depend
 - **World persistence** — your edits, inventory, position, and time of day auto-save to `localStorage`
 - **Juice** — block-break particles, procedural sound effects, ambient-occlusion shading, held-item viewmodel, damage vignette
 
-- **Multiplayer (NEW)** — run `node server/mp-server.js` (zero dependencies), press ⛁ Multiplayer, join with friends: shared blocks, live player avatars with nameplates and arm swings, chat, /tell, Tab player list, operator kicks, synced time and weather, death messages, persistent world (`server/db.json`), reconnect tokens and automatic reconnect after a short network outage
+- **Multiplayer** — run `node server/mp-server.js` (zero dependencies), press ⛁ Multiplayer, join with friends: shared blocks and thrown items, live player avatars (walk/sneak/sprint/swim/fly poses, held item, nameplates tinted per player), world chat with `/tell` and `/me`, a **Tab player list** (health, dimension, ping bars, operator stars), operator `/kick` and `/op`, synced time & weather, death and dimension-change announcements, and a world that persists in `server/db.json`
+- **Multiplayer that recovers** — automatic reconnection with backoff if the server or Wi‑Fi blinks (you keep playing and get re-synced), a live connection status + ping readout (`/ping`, F3, Tab), and an **edit outbox**: blocks you place while offline are remembered and pushed the moment the connection is back, so builds are never lost
+- **World stays in sync** — edits made anywhere on the map (even far outside your render distance) are stored and replayed when you get there, so a friend's far-away base is never "missing"; the whole world is also re-sent when you rejoin
+- **Multiplayer details** — nicknames in any language (Cyrillic too), the MP screen shows a live server card (name, players online, seed, edit count) via `/status`, the server prints `/status` JSON and serves the game itself on one port, and `--db file.json` lets one machine host several worlds
 - **Chat & cheat commands (NEW)** — T to chat, / for 20+ commands: /gamemode, /give, /tp, /spawn, /time, /weather, /kill, /heal, /clear, /fly, /summon, /setblock, /locate, /rd, /seed, /me, /list, /tell, /op, /kick (Tab-completion, ↑↓ history)
 - **Tool & armor durability (NEW)** — Minecraft values (gold is fast but fragile), damage bars, items break
 - **Drowning, clouds & rain (NEW)** — air bubbles, drifting blocky clouds, /weather rain with sound and dark skies
@@ -68,8 +71,30 @@ In the inventory (Minecraft-style): **left-click** picks up / places / swaps sta
 | **F3** | Debug overlay |
 | **V / F5** | Switch camera (1st person / 3rd person back / front) |
 | **T / /** | Chat / cheat commands |
-| **Tab** | Player list (multiplayer) |
+| **Tab** | Player list — names, hearts, ping, dimension (multiplayer) |
 | **Esc** | Pause / release mouse |
+
+## Multiplayer
+
+```sh
+node server/mp-server.js                       # serves the game AND the server on :8080
+node server/mp-server.js --port 9000 --name "My World" --op Steve --seed 12345
+```
+
+Open `http://<your-ip>:8080` in a browser (friends on the same network use your LAN IP; for the internet, forward the port or run it behind a reverse proxy with WebSocket support). Everything is on **one port**: the game files, the WebSocket endpoint `/ws`, and an info endpoint `/status`.
+
+| Flag | Meaning |
+| --- | --- |
+| `--port 8080` | listen port (default 8080) |
+| `--name "Text"` | server name shown in chat/`/status` |
+| `--seed 12345` | world seed (default: saved in db.json, then random) |
+| `--op Steve` | grant operator to a nickname (comma-separated for several) |
+| `--db file.json` | which world file to use (default `server/db.json`) |
+| `--max-deltas N` | how many block edits to keep (default 20000, oldest dropped) |
+
+The **first player to join an operator-less server becomes operator**; operators can `/kick` and `/op` others. Players near the spawn plaza are invulnerable and cannot build there unless they are operators or in creative mode.
+
+Multiplayer tips: `/list` shows who is online, `/ping` shows your latency, `/tp <player>` teleports to a friend, `/me waves` emotes, and the server console prints every join/leave/chat.
 
 ## Play locally
 
@@ -81,23 +106,11 @@ ruby -run -e httpd . -p 8123     # or: python3 -m http.server 8123
 
 Then open <http://localhost:8123>.
 
-For multiplayer, serve the game and WebSocket endpoint from the same process:
-
-```sh
-node server/mp-server.js --port 8080 --name "My WebCraft Server"
-```
-
-Open `http://localhost:8080` for every player. The first player on a fresh
-`server/db.json` becomes an operator; `/status` shows the current online list.
-The client keeps a short reconnect token, restores the same player identity
-after a refresh, queues edits made during a brief disconnect, and applies the
-server's complete block snapshot to unloaded chunks as they are discovered.
-
 ## Deploy to GitHub Pages
 
 1. Push this repository to GitHub.
 2. In the repo: **Settings → Pages → Source: Deploy from a branch**, pick `main` and `/ (root)`.
-3. Your world is live at `https://<username>.github.io/<repo>/`.
+3. Your world is live at `https://<username>.github.io/<repo>/` (this repo's `CNAME` file points at `professionalarduino-max.webcraft.dev`; delete it to go back to the plain github.io address).
 
 ## URL parameters
 
@@ -119,5 +132,7 @@ server's complete block snapshot to unloaded chunks as they are discovered.
 | `js/drops.js` | Dropped-item entities with magnet pickup |
 | `js/sound.js` | Procedural WebAudio sound effects |
 | `js/main.js` | Renderer, input, timed mining, inventory/crafting UI, HUD, day/night cycle, save/load |
+| `js/net.js` | Multiplayer client: reconnection, ping, acknowledged block-edit outbox, remote-player state |
+| `server/mp-server.js` | Zero-dependency server: static files + `/ws` + `/status`, shared world in `db.json` |
 
 The world is generated in 16×16×80 chunks. Each chunk is meshed into a single geometry containing only the exposed block faces, with per-vertex ambient occlusion, and re-meshed on edit. Block edits are stored as per-chunk diffs so worlds regenerate deterministically from the seed plus your changes.

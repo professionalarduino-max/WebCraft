@@ -429,7 +429,16 @@ html, body {
   padding: 10px 16px; z-index: 32; display: none; font: 14px monospace; color: #fff;
 }
 #tabList.show { display: block; }
-#tabList .tab-head { color: #ffd76e; margin-bottom: 6px; }
+#tabList .tab-head { color: #ffd76e; margin-bottom: 6px; border-bottom: 1px solid #444; padding-bottom: 5px; }
+/* player rows: name | ping bars | hearts | dimension */
+#tabList div:not(.tab-head) {
+  display: grid; grid-template-columns: 1fr auto auto auto;
+  gap: 10px; align-items: center; padding: 2px 0; white-space: nowrap;
+}
+#tabList div span:nth-child(2) { color: #6ee06e; letter-spacing: 1px; }
+#tabList div span:nth-child(3) { color: #ff6f6f; letter-spacing: 1px; }
+#tabList div span:nth-child(4) { color: #9fd0ff; }
+#tabList .tab-you { background: rgba(255, 215, 110, 0.12); }
 
 /* durability bars */
 #hotbar .slot, .inv-slot { position: relative; }

@@ -2,9 +2,8 @@
 // world time (input slot, fuel slot, output slot, burn + progress timers).
 
 import { I, SMELTING, FUEL, SMELT_TIME, maxStack } from './items.js';
+import { encSlot as enc, decSlot as dec } from './inventory.js';
 
-const enc = (s) => (s ? [s.id, s.n] : null);
-const dec = (v) => (v && v[1] > 0 ? { id: +v[0], n: +v[1] } : null);
 
 export class Furnaces {
   constructor() {
@@ -98,8 +97,9 @@ export class Furnaces {
 // Chests: 27-slot containers keyed by position (village loot + player-built).
 
 export class Chests {
-  constructor() {
-    this.map = new Map(); // key -> {slots: Array(27)}
+  constructor(size = 27) {
+    this.size = size;
+    this.map = new Map(); // key -> {slots: Array(size)}
   }
 
   key(x, y, z) { return x + ',' + y + ',' + z; }
@@ -108,7 +108,7 @@ export class Chests {
   get(key, create = false) {
     let s = this.map.get(key);
     if (!s && create) {
-      s = { slots: new Array(27).fill(null) };
+      s = { slots: new Array(this.size).fill(null) };
       this.map.set(key, s);
       return [s, true];
     }
@@ -132,7 +132,7 @@ export class Chests {
   load(data) {
     if (!Array.isArray(data)) return;
     for (const [k, slots] of data) {
-      this.map.set(k, { slots: (slots || []).map(dec).concat(new Array(27).fill(null)).slice(0, 27) });
+      this.map.set(k, { slots: (slots || []).map(dec).concat(new Array(this.size).fill(null)).slice(0, this.size) });
     }
   }
 }

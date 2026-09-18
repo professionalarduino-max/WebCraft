@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { Perlin, fbm2, hash2, hash3 } from './noise.js';
 import { B, BLOCKS, isOpaque, tileUV, blockBoxes, emitBox, emitCross } from './blocks.js';
+import { updatePower, rsTouch as rsMechTouch, rsObserve } from './redstone.js';
 
 export const CHUNK = 16;
 export const HEIGHT = 80;
@@ -24,9 +25,11 @@ const FACES = [
 const key = (cx, cz) => cx + ',' + cz;
 
 export class World {
-  constructor(seed, scene, materials, renderDist = 4, dim = 'overworld') {
+  constructor(seed, scene, materials, renderDist = 4, dim = 'overworld', opts = {}) {
     this.seed = seed | 0;
     this.dim = dim;
+    this.gen = dim === 'overworld' ? (opts.gen || 'normal') : 'normal'; // normal | flat | oneblock
+    this.mpSpawn = !!opts.mpSpawn; // multiplayer: generate the beautiful spawn plaza
     this.scene = scene;
     this.materials = materials; // {opaque, water, lava}
     this.renderDist = renderDist;
@@ -170,6 +173,8 @@ export class World {
   genChunkData(cx, cz) {
     if (this.dim === 'nether') return this.genNetherChunk(cx, cz);
     if (this.dim === 'end') return this.genEndChunk(cx, cz);
+    if (this.gen === 'flat') return this.genFlatChunk(cx, cz);
+    if (this.gen === 'oneblock') return this.genOneblockChunk(cx, cz);
     const data = new Uint8Array(CHUNK * CHUNK * HEIGHT);
     const PAD = 3; // extra columns so trees from neighbor chunks reach in
     const W = CHUNK + PAD * 2;
@@ -297,15 +302,22 @@ export class World {
           if (r < 0.006) {
             const ht = 1 + ((hash2(wx, wz, this.seed + 21) * 3) | 0);
             for (let dy = 1; dy <= ht; dy++) data[idx + (h + dy) * CHUNK * CHUNK] = B.CACTUS;
+          } else if (r < 0.010 && h <= SEA + 1) {
+            const ht = 1 + ((hash2(wx, wz, this.seed + 22) * 2) | 0);
+            for (let dy = 1; dy <= ht; dy++) data[idx + (h + dy) * CHUNK * CHUNK] = B.SUGAR_CANE;
           }
         } else if (!snowy && ground === B.GRASS) {
-          if (r < 0.014) {
+          if (r < 0.016) {
+            const fr = hash2(wx, wz, this.seed + 33);
             data[idx + (h + 1) * CHUNK * CHUNK] =
-              hash2(wx, wz, this.seed + 33) < 0.55 ? B.DANDELION : B.POPPY;
-          } else if (r < 0.0155) {
+              fr < 0.3 ? B.DANDELION : fr < 0.55 ? B.POPPY : fr < 0.7 ? B.BLUE_ORCHID : fr < 0.82 ? B.ALLIUM : fr < 0.91 ? B.RED_MUSHROOM : B.BROWN_MUSHROOM;
+          } else if (r < 0.0175) {
             data[idx + (h + 1) * CHUNK * CHUNK] = B.PUMPKIN;
-          } else if (r < 0.017 && treeDensity > 0.02) {
+          } else if (r < 0.019 && treeDensity > 0.02) {
             data[idx + (h + 1) * CHUNK * CHUNK] = B.MELON;
+          } else if (r < 0.021 && h <= SEA + 1) {
+            const ht = 1 + ((hash2(wx, wz, this.seed + 79) * 2) | 0);
+            for (let dy = 1; dy <= ht && h + dy < HEIGHT; dy++) data[idx + (h + dy) * CHUNK * CHUNK] = B.SUGAR_CANE;
           }
         }
       }
@@ -313,9 +325,14 @@ export class World {
 
     // structures (villages, stronghold), then player edits on top
     this.genVillages(data, cx, cz);
+    if (this.mpSpawn) this.genSpawnPlaza(data, cx, cz);
     this.genStronghold(data, cx, cz);
+    this.applyEdits(data, cx, cz);
+    return data;
+  }
 
-    // player edits
+  // player edits on top of generated terrain
+  applyEdits(data, cx, cz) {
     const ce = this.edits.get(key(cx, cz));
     if (ce) {
       for (const [lkey, id] of ce) {
@@ -324,6 +341,36 @@ export class World {
           data[lx + lz * CHUNK + y * CHUNK * CHUNK] = id;
       }
     }
+  }
+
+  // superflat: bedrock + dirt + grass, no caves/trees/ores
+  genFlatChunk(cx, cz) {
+    const data = new Uint8Array(CHUNK * CHUNK * HEIGHT);
+    for (let lz = 0; lz < CHUNK; lz++) {
+      for (let lx = 0; lx < CHUNK; lx++) {
+        const i = lx + lz * CHUNK;
+        data[i] = B.BEDROCK;
+        data[i + CHUNK * CHUNK] = B.DIRT;
+        data[i + 2 * CHUNK * CHUNK] = B.DIRT;
+        data[i + 3 * CHUNK * CHUNK] = B.GRASS;
+      }
+    }
+    this.applyEdits(data, cx, cz);
+    return data;
+  }
+
+  // one block: void with a 5x5 safety platform + the infinite block at (0,63,0)
+  genOneblockChunk(cx, cz) {
+    const data = new Uint8Array(CHUNK * CHUNK * HEIGHT); // all AIR
+    if (cx === 0 && cz === 0) {
+      for (let lx = 0; lx <= 4; lx++) {
+        for (let lz = 0; lz <= 4; lz++) {
+          data[lx + lz * CHUNK + 62 * CHUNK * CHUNK] = B.COBBLE;
+        }
+      }
+      data[63 * CHUNK * CHUNK] = B.GRASS; // the infinite block at (0,63,0)
+    }
+    this.applyEdits(data, cx, cz);
     return data;
   }
 
@@ -433,6 +480,7 @@ export class World {
     if (!c) {
       c = { cx, cz, data: this.genChunkData(cx, cz), meshO: null, meshW: null, hasMesh: false };
       this.chunks.set(k, c);
+      this.rsScanChunk(c);
     }
     return c;
   }
@@ -457,7 +505,12 @@ export class World {
     const c = this.chunks.get(key(cx, cz));
     if (!c) return false;
     const lx = x - cx * CHUNK, lz = z - cz * CHUNK;
-    c.data[lx + lz * CHUNK + y * CHUNK * CHUNK] = id;
+    const li = lx + lz * CHUNK + y * CHUNK * CHUNK;
+    const old = c.data[li];
+    c.data[li] = id;
+    if (old !== id) this.rsTouch(x, y, z, old, id); // redstone registries
+    if (old !== id) { try { rsObserve(this, x, y, z); } catch (e) {} } // watchers pulse
+    if (old !== id) this.liquidTouch(x, y, z, old, id); // liquid flow queue
 
     const k = key(cx, cz);
     let ce = this.edits.get(k);
@@ -469,7 +522,85 @@ export class World {
     const dxs = lx === 0 ? [-1, 0] : lx === CHUNK - 1 ? [0, 1] : [0];
     const dzs = lz === 0 ? [-1, 0] : lz === CHUNK - 1 ? [0, 1] : [0];
     for (const dx of dxs) for (const dz of dzs) this.dirty.add(key(cx + dx, cz + dz));
+    if (this.onEdit && !this._muteEdit) { try { this.onEdit(x, y, z, id); } catch (e) {} }
+    if (old !== id && !this._rsLock) { // redstone networks recompute (guarded against recursion)
+      this._rsLock = true;
+      let acts = null;
+      try { acts = updatePower(this, x, y, z); } catch (e) { console.warn('redstone', e); } finally { this._rsLock = false; }
+      if (acts && acts.length && this.onRedstoneAction) for (const a of acts) { a.dim = this.dim; try { this.onRedstoneAction(a); } catch (e) {} }
+    }
     return true;
+  }
+
+  // liquid flow bookkeeping: fresh liquid is a full-strength source;
+  // any change wakes adjacent liquids (dug a hole next to a lake -> it pours in)
+  liquidTouch(x, y, z, old, id) {
+    if (!this._liqQueue) { this._liqQueue = new Set(); this._liqDist = new Map(); }
+    const k = x + ',' + y + ',' + z;
+    if (id === B.WATER || id === B.LAVA) {
+      this._liqQueue.add(k);
+      this._liqDist.set(k, 0);
+    } else if (old === B.WATER || old === B.LAVA) {
+      this._liqDist.delete(k);
+    }
+    const nb = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+    for (const [dx, dy, dz] of nb) {
+      const nid = this.getBlock(x + dx, y + dy, z + dz);
+      if (nid === B.WATER || nid === B.LAVA) this._liqQueue.add((x + dx) + ',' + (y + dy) + ',' + (z + dz));
+    }
+  }
+  // redstone registries: sensors + pressed plates + timed buttons + lit notes
+  rsKey(x, y, z) { return x + ',' + y + ',' + z; }
+  rsTouch(x, y, z, old, id) {
+    if (!this._rsSensors) {
+      this._rsSensors = new Set(); this._rsPlates = new Set();
+      this._rsButtons = new Map(); this._rsNotes = new Set();
+    }
+    const k = this.rsKey(x, y, z);
+    if (old === B.SENSOR || old === B.SENSOR_ON) this._rsSensors.delete(k);
+    if (id === B.SENSOR || id === B.SENSOR_ON) this._rsSensors.add(k); // both variants need dawn/dusk checks
+    if (old === B.PLATE_ON && id !== B.PLATE_ON) this._rsPlates.delete(k);
+    if (old === B.BUTTON_ON && id !== B.BUTTON_ON) this._rsButtons.delete(k);
+    if (old === B.NOTE_BLOCK) this._rsNotes.delete(k);
+    try { rsMechTouch(this, x, y, z, old, id); } catch (e) {}
+  }
+  // manual power recompute (comparator toggle, target expiry, follow-ups)
+  rsUpdate(x, y, z) {
+    if (this._rsLock) return;
+    this._rsLock = true;
+    let acts = null;
+    try { acts = updatePower(this, x, y, z); } catch (e) { console.warn('redstone', e); } finally { this._rsLock = false; }
+    if (acts && acts.length && this.onRedstoneAction) for (const a of acts) { a.dim = this.dim; try { this.onRedstoneAction(a); } catch (e) {} }
+  }
+  // facing/state map persistence (one per dimension, saved by main.js)
+  rsDataSave() { return this._rsData ? [...this._rsData].slice(0, 20000) : []; }
+  rsDataLoad(arr) {
+    this._rsData = new Map();
+    if (!Array.isArray(arr)) return;
+    for (const [k, st] of arr) {
+      if (typeof k !== 'string' || !st || typeof st !== 'object') continue;
+      const clean = {};
+      for (const f of ['f', 'd', 'm', 'e', 'last', 'piston']) if (Number.isInteger(st[f])) clean[f] = st[f];
+      this._rsData.set(k, clean);
+    }
+  }
+  rsScanChunk(c) { // rebuild registries for a freshly loaded chunk
+    if (!this._rsSensors) {
+      this._rsSensors = new Set(); this._rsPlates = new Set();
+      this._rsButtons = new Map(); this._rsNotes = new Set();
+    }
+    const baseX = c.cx * CHUNK, baseZ = c.cz * CHUNK;
+    for (let y = 0; y < HEIGHT; y++) for (let lz = 0; lz < CHUNK; lz++) for (let lx = 0; lx < CHUNK; lx++) {
+      const id = c.data[lx + lz * CHUNK + y * CHUNK * CHUNK];
+      const k = (baseX + lx) + ',' + y + ',' + (baseZ + lz);
+      if (id === B.SENSOR || id === B.SENSOR_ON) this._rsSensors.add(k);
+      else if (id === B.BUTTON_ON) this._rsButtons.set(k, 0); // stuck buttons release on next tick
+      else if (id === B.PLATE_ON) this._rsPlates.add(k);
+      else if (id === B.DISPENSER || id === B.DROPPER || id === B.HOPPER) {
+        if (!this._rsMech) this._rsMech = new Set();
+        this._rsMech.add(k);
+      }
+    }
   }
 
   // Highest non-air block; returns {y, id} or null.
@@ -516,6 +647,19 @@ export class World {
               continue;
             }
             let conn = null;
+            if (blk.shape === 'dust') {
+              const wire = (nb) => nb === B.REDSTONE_DUST || nb === B.REDSTONE_DUST_ON;
+              conn = {
+                nx: wire(get(lx - 1, y, lz)), px: wire(get(lx + 1, y, lz)),
+                nz: wire(get(lx, y, lz - 1)), pz: wire(get(lx, y, lz + 1)),
+              };
+            }
+            if (blk.shape === 'repeater' || blk.shape === 'pistonhead' || blk.shape === 'frontplate') {
+              const st = this._rsData ? this._rsData.get((baseX + lx) + ',' + y + ',' + (baseZ + lz)) : null;
+              conn = blk.shape === 'repeater'
+                ? { facing: blk.facing || 0, delay: (st && st.d) || 1, sub: (st && st.m) || 0 }
+                : { f: (st && st.f != null) ? st.f : 0 };
+            }
             if (blk.shape === 'fence' || blk.shape === 'pane') {
               const link = (nb) => nb === id || isOpaque(nb) || (blk.shape === 'pane' && nb === B.GLASS);
               conn = {
@@ -544,7 +688,7 @@ export class World {
           for (const f of FACES) {
             const nb = get(lx + f.dir[0], y + f.dir[1], lz + f.dir[2]);
             if (isOpaque(nb)) continue;
-            if (nb === id && (water || lava || id === B.GLASS)) continue;
+            if (nb === id && (water || lava || id === B.GLASS || id === B.COBWEB)) continue;
 
             const tile = f.dir[1] === 1 ? blk.top : f.dir[1] === -1 ? blk.bottom : blk.side;
             const r = tileUV(tile);
@@ -682,8 +826,63 @@ export class World {
     }
   }
 
+  // Multiplayer spawn column (cached): plaza + safe zone anchor.
+  mpSpawnPos() {
+    if (!this._spawnPos) {
+      const s = this.findSpawn();
+      const x = Math.floor(s.x), z = Math.floor(s.z);
+      this._spawnPos = { x, z, h: this.columnInfo(x, z).h };
+    }
+    return this._spawnPos;
+  }
+
+  // Beautiful spawn plaza: round platform, paths, glow lamps, fence,
+  // corner pillars, a fountain and flowers. Edits apply afterwards, so
+  // player builds always win over the plaza.
+  genSpawnPlaza(data, cx, cz) {
+    const sp = this.mpSpawnPos();
+    const sx = sp.x, sz = sp.z, H = sp.h;
+    const set = (wx, y, wz, id) => {
+      const lx = wx - cx * CHUNK, lz = wz - cz * CHUNK;
+      if (lx < 0 || lx >= CHUNK || lz < 0 || lz >= CHUNK || y < 2 || y >= HEIGHT) return;
+      data[lx + lz * CHUNK + y * CHUNK * CHUNK] = id;
+    };
+    const R = 8;
+    for (let dx = -R; dx <= R; dx++) for (let dz = -R; dz <= R; dz++) {
+      if (dx * dx + dz * dz > R * R) continue;
+      for (let y = H - 2; y <= H - 1; y++) set(sx + dx, y, sz + dz, B.COBBLE);
+      let f = B.STONE_BRICK;
+      if (dx === 0 || dz === 0) f = B.COBBLE; // cross paths
+      if (Math.abs(dx) === 4 && Math.abs(dz) === 4) f = B.GLOWSTONE; // 4 lamps
+      if (Math.abs(dx) <= 1 && Math.abs(dz) <= 1) f = B.PLANK; // welcome mat
+      set(sx + dx, H, sz + dz, f);
+    }
+    for (let dx = -R - 1; dx <= R + 1; dx++) for (let dz = -R - 1; dz <= R + 1; dz++) {
+      if (dx * dx + dz * dz > (R + 1) * (R + 1)) continue;
+      for (let y = H + 1; y <= H + 8; y++) set(sx + dx, y, sz + dz, B.AIR);
+    }
+    for (const [dx, dz] of [[8, 0], [-8, 0], [0, 8], [0, -8], [6, 6], [6, -6], [-6, 6], [-6, -6]]) {
+      set(sx + dx, H + 1, sz + dz, B.FENCE);
+      set(sx + dx, H + 2, sz + dz, B.TORCH);
+    }
+    for (const [dx, dz] of [[5, 5], [5, -5], [-5, 5], [-5, -5]]) {
+      for (let y = H + 1; y <= H + 3; y++) set(sx + dx, y, sz + dz, B.COBBLE);
+      set(sx + dx, H + 4, sz + dz, B.GLOWSTONE);
+    }
+    const fx = sx - 5, fz = sz; // fountain (west side, spawn column stays clear)
+    for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) {
+      set(fx + dx, H + 1, fz + dz, Math.max(Math.abs(dx), Math.abs(dz)) === 2 ? B.STONE_BRICK : B.WATER);
+    }
+    set(fx, H + 2, fz, B.COBBLE);
+    set(fx, H + 3, fz, B.GLOWSTONE);
+    const fl = [[3, 0], [0, 3], [0, -3], [2, 2], [2, -2], [-2, 2], [-2, -2], [-4, 3]];
+    fl.forEach(([dx, dz], i) => set(sx + dx, H + 1, sz + dz, i % 2 ? B.DANDELION : B.POPPY));
+  }
+
   // Find a dry spawn column near origin.
   findSpawn() {
+    if (this.gen === 'flat') return { x: 8.5, y: 4, z: 8.5 };
+    if (this.gen === 'oneblock') return { x: 0.5, y: 64, z: 0.5 };
     for (let r = 0; r < 40; r++) {
       for (let attempt = 0; attempt < 8; attempt++) {
         const x = (r === 0 && attempt === 0) ? 8 : Math.round((hash2(r, attempt, this.seed) - 0.5) * 2 * (r * 12 + 8));

@@ -5,14 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>WebCraft — Minecraft in your browser</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='6' fill='%2378b74a'/><rect y='6' width='16' height='10' fill='%23795c3a'/></svg>">
-  <link rel="stylesheet" href="./style.css">
+  <script>document.write('<link rel="stylesheet" href="./style.css?v=' + Date.now() + '">');</script>
   <script>
     // Cache-bust all game modules per page load so a deploy can never serve a
     // mixed set of old/new files (GitHub Pages caches each file independently
     // for 10 minutes, which otherwise causes version-skew bugs).
     (function () {
       var V = Date.now();
-      var mods = ['noise', 'blocks', 'physics', 'sound', 'world', 'player', 'mobs', 'items', 'inventory', 'drops', 'main'];
+      var mods = ['noise', 'blocks', 'physics', 'sound', 'world', 'player', 'playermodel', 'mobs', 'items', 'inventory', 'drops', 'structures', 'worlds', 'net', 'chat', 'furnace', 'redstone', 'main'];
       var imports = { three: 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js' };
       for (var i = 0; i < mods.length; i++) {
         imports['./js/' + mods[i] + '.js'] = './js/' + mods[i] + '.js?v=' + V;
@@ -30,46 +30,111 @@
     <div id="hearts"></div>
     <div id="hunger"></div>
     <div id="armorbar"></div>
+    <div id="airbar"></div>
     <div id="hotbar"></div>
+    <div id="chatLog"></div>
+    <div id="chatRow"><span class="chat-prompt">&gt;</span><input id="chatInput" maxlength="256" autocomplete="off" spellcheck="false"></div>
+    <div id="tabList"></div>
     <div id="blockname"></div>
     <div id="debug"></div>
+    <div id="oneblockHud"></div>
     <div id="vignette-damage"></div>
     <div id="underwater"></div>
     <div id="fireOverlay"></div>
     <div id="portalOverlay"></div>
-    <div id="bossbar"><div class="boss-name">Ender Dragon</div><div class="boss-track"><div id="bossFill"></div></div></div>
+    <div id="bossbar"><div class="boss-name">Дракон Края</div><div class="boss-track"><div id="bossFill"></div></div></div>
   </div>
 
   <div id="overlay">
     <div class="panel">
       <h1 id="overlayTitle">WEBCRAFT</h1>
-      <p class="sub">a Minecraft clone for the browser</p>
-      <button id="playBtn" class="mc-btn">▶ Play</button>
-      <button id="fullscreenBtn" class="mc-btn">⛶ Fullscreen</button>
-      <button id="modeBtn" class="mc-btn">⚒ Mode: Survival</button>
-      <button id="newWorldBtn" class="mc-btn">✦ New World</button>
-      <div class="controls">
-        <div><b>WASD</b> move &nbsp; <b>Space</b> jump/swim &nbsp; <b>Shift</b> sneak</div>
-        <div><b>Hold Ctrl</b> sprint</div>
-        <div><b>Hold left click</b> mine / attack &nbsp; <b>Right click</b> place / eat</div>
-        <div><b>E</b> inventory &amp; crafting &nbsp; <b>1–9 / scroll</b> hotbar</div>
-        <div><b>F</b> or <b>double-tap Space</b> fly (creative) &nbsp; <b>F3</b> debug &nbsp; <b>Esc</b> pause</div>
+      <div id="splash">Руби деревья!</div>
+      <p class="sub">клон Майнкрафта для браузера</p>
+
+      <div id="menuMain" class="mscreen show">
+        <button id="playBtn" class="mc-btn">▶ Продолжить</button>
+        <button id="singleBtn" class="mc-btn">Одиночная</button>
+        <button id="mpBtn" class="mc-btn">Сетевая</button>
+        <button id="settingsBtn" class="mc-btn">Параметры</button>
+        <p class="foot"><span id="seedLabel"></span> · WebCraft 1.3 — фанатский ремейк</p>
+        <p class="hint">Мир сохраняется автоматически. Осторожно: ночью зомби!</p>
       </div>
-      <div class="prefs">
-        <label>Sensitivity <input type="range" id="sensSlider" min="10" max="200" step="5" value="100"> <span id="sensVal">100%</span></label>
-        <label><input type="checkbox" id="bobToggle" checked> View bobbing</label>
+
+      <div id="menuSingle" class="mscreen">
+        <h2>Одиночная игра</h2>
+        <div id="worldList"></div>
+        <div class="create-row">
+          <input id="worldName" maxlength="24" placeholder="Название мира" autocomplete="off">
+          <input id="worldSeed" placeholder="Сид (необязательно)" autocomplete="off" spellcheck="false">
+          <select id="worldMode"><option value="survival">Выживание</option><option value="creative">Творческий</option></select>
+          <select id="worldType"><option value="normal">Обычный</option><option value="flat">Плоский</option><option value="oneblock">Один блок</option></select>
+        </div>
+        <button id="createWorldBtn" class="mc-btn">＋ Создать мир</button>
+        <div class="btn-row">
+          <button id="playWorldBtn" class="mc-btn half">Играть</button>
+          <button id="deleteWorldBtn" class="mc-btn half">Удалить</button>
+        </div>
+        <button id="backSingle" class="mc-btn">← Назад</button>
       </div>
-      <p class="seed" id="seedLabel"></p>
-      <p class="hint">World auto-saves in your browser. Watch out for zombies at night!</p>
-      <p class="hint">Tip: play in fullscreen — it captures Ctrl+W and other browser shortcuts so they stay in-game.</p>
-      <p class="hint">Made by Elliot DeBruin using Fable 5</p>
+
+      <div id="menuMP" class="mscreen">
+        <h2>Сетевая игра</h2>
+        <div class="server-card">
+          <div class="server-name">⛁ WebCraft Official</div>
+          <div id="mpStatus" class="mp-status"></div>
+          <button id="playMPBtn" class="mc-btn">▶ Играть</button>
+        </div>
+        <div class="mp-row"><label>Ник <input id="mpName" maxlength="16" autocomplete="off"></label></div>
+        <div class="mp-row"><label>Сервер <input id="mpAddr" autocomplete="off" spellcheck="false"></label></div>
+        <div class="btn-row"><button id="mpJoin" class="mc-btn small2">Подключиться</button><button id="mpLeave" class="mc-btn small2">Отключиться</button></div>
+        <div class="mp-hint">Свой сервер: <b>node server/mp-server.js</b></div>
+        <button id="backMP" class="mc-btn">← Назад</button>
+      </div>
+
+      <div id="menuSettings" class="mscreen">
+        <h2>Параметры</h2>
+        <div class="btn-row">
+          <button id="modeBtn" class="mc-btn half">⚒ Режим: Выживание</button>
+          <button id="fullscreenBtn" class="mc-btn half">⛶ Во весь экран</button>
+        </div>
+        <div class="btn-row">
+          <button id="musicBtn" class="mc-btn half">♫ Музыка: ВКЛ</button>
+          <button id="soundBtn" class="mc-btn half">🔊 Звук: ВКЛ</button>
+        </div>
+        <div class="prefs">
+          <label>Чувствительность <span><input type="range" id="sensSlider" min="10" max="200" step="5" value="100"> <span id="sensVal">100%</span></span></label>
+          <label>Громкость <span><input type="range" id="volSlider" min="0" max="100" step="5" value="100"> <span id="volVal">100%</span></span></label>
+          <label>Дальность <span><input type="range" id="rdSlider" min="2" max="8" step="1" value="4"> <span id="rdVal">4</span></span></label>
+          <label><input type="checkbox" id="bobToggle" checked> Покачивание камеры</label>
+        </div>
+        <details class="controls">
+          <summary>Управление</summary>
+          <div class="controls-grid">
+            <div><b>WASD</b> движение</div>
+            <div><b>Мышь</b> осмотр</div>
+            <div><b>Пробел</b> прыжок / плыть</div>
+            <div><b>Shift</b> красться</div>
+            <div><b>Ctrl</b> бег</div>
+            <div><b>ЛКМ</b> ломать / бить</div>
+            <div><b>ПКМ</b> ставить / есть</div>
+            <div><b>E</b> инвентарь и крафт</div>
+            <div><b>1–9 / колесо</b> панель</div>
+            <div><b>F / 2×Пробел</b> полёт</div>
+            <div><b>V / F5</b> камера</div>
+            <div><b>СКМ</b> взять блок</div>
+            <div><b>T / /</b> чат / команды</div>
+            <div><b>F3</b> отладка · <b>Esc</b> пауза</div>
+          </div>
+        </details>
+        <button id="backSettings" class="mc-btn">← Назад</button>
+      </div>
     </div>
   </div>
 
   <div id="deathScreen">
     <div class="panel">
-      <h1>You died!</h1>
-      <button id="respawnBtn" class="mc-btn">Respawn</button>
+      <h1>Вы погибли!</h1>
+      <button id="respawnBtn" class="mc-btn">Возродиться</button>
     </div>
   </div>
 
@@ -92,14 +157,25 @@
           <div class="furnace-arrow"><div id="progFill"></div></div>
           <div id="furnOut"></div>
         </div>
-        <h2>Inventory <span class="tip" id="armorTip">armor →</span></h2>
-        <div id="armorRow" class="slot-grid"></div>
+        <div id="playerRow">
+          <div id="playerPreview">
+            <h2>Player</h2>
+            <canvas id="playerCanvas" width="150" height="190"></canvas>
+            <div class="pv-hint">drag to rotate</div>
+          </div>
+          <div id="armorCol">
+            <h2>Armor</h2>
+            <div id="armorRow" class="slot-grid"></div>
+          </div>
+        </div>
+        <h2>Inventory</h2>
         <div id="invMain" class="slot-grid"></div>
         <div id="invHotbarRow" class="slot-grid hotbar-row"></div>
         <div class="tip-line" id="invTip">Drag to move · right-click splits · shift-click quick-moves · hover + 1–9 or Q</div>
       </div>
       <div class="inv-col recipes">
         <h2>Recipes <span class="tip">click one to fill the grid</span></h2>
+        <div id="paletteTabs"></div>
         <div id="craftList"></div>
       </div>
       <button id="invClose" class="mc-btn small">Close (E)</button>

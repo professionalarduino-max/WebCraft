@@ -24,6 +24,26 @@ export const B = {
   LADDER: 105, // 4 facings: 105..108
   DOOR: 109,   // bottom halves: closed 109..112, open 113..116 (by facing)
   DOOR_TOP: 117, DOOR_TOP_OPEN: 118,
+  // new blocks (must stay below 200 — non-block items start there)
+  COAL_BLOCK: 119, JACK_O_LANTERN: 120, MOSSY_STONE_BRICK: 121,
+  SPRUCE_STAIRS: 122, SANDSTONE_STAIRS: 126, // 4 facings each
+  BLUE_ORCHID: 130, ALLIUM: 131, COBWEB: 132,
+  ENCHANT_TABLE: 133, JUKEBOX: 134, NOTE_BLOCK: 135,
+  SPRUCE_SLAB: 136, BIRCH_SLAB: 137,
+  STONE_STAIRS: 138, // 4 facings: 138..141
+  DARK_LOG: 142, DARK_PLANK: 143, IRON_BARS: 144, MAGMA: 145,
+  PACKED_ICE: 146, SEA_LANTERN: 147, CHISELED_BRICKS: 148, TINTED_GLASS: 149,
+  CRYING_OBSIDIAN: 150, NETHERITE_BLOCK: 151, BONE_BLOCK: 152, AMETHYST: 153,
+  RED_MUSHROOM: 154, BROWN_MUSHROOM: 155, SUGAR_CANE: 156, LANTERN: 157, SLIME_BLOCK: 158,
+  REDSTONE_DUST: 159, REDSTONE_DUST_ON: 160, RTORCH: 161, RTORCH_OFF: 162,
+  LEVER: 163, LEVER_ON: 164, BUTTON: 165, BUTTON_ON: 166, PLATE: 167, PLATE_ON: 168,
+  LAMP: 169, LAMP_ON: 170, SENSOR: 171, SHULKER_BOX: 172,
+  REPEATER: 173, // off facings 173..176, on 177..180
+  COMPARATOR: 181, // off 181..184, on 185..188
+  OBSERVER: 189, OBSERVER_ON: 190,
+  PISTON: 191, STICKY_PISTON: 192, PISTON_HEAD: 193,
+  DISPENSER: 194, DROPPER: 195, HOPPER: 196,
+  BULB: 197, BULB_ON: 198, TARGET: 199,
 };
 
 export const TILE = {
@@ -49,6 +69,27 @@ export const TILE = {
   ICON_SLAB_STONE_BRICK: 95, ICON_SLAB_BRICK: 96, ICON_SLAB_SANDSTONE: 97,
   ICON_STAIR_OAK: 98, ICON_STAIR_COBBLE: 99, ICON_STAIR_STONE_BRICK: 100, ICON_STAIR_BRICK: 101,
   LADDER: 102, DOOR_BOTTOM: 103, DOOR_TOP: 104, ICON_DOOR: 105,
+  COAL_BLOCK: 106, JACK_SIDE: 107, MOSSY_STONE_BRICK: 108,
+  BLUE_ORCHID: 109, ALLIUM: 110, COBWEB: 111,
+  ENCHANT_TOP: 112, ENCHANT_SIDE: 113, JUKEBOX_TOP: 114, JUKEBOX_SIDE: 115,
+  NOTE_BLOCK: 116, ICON_STAIR_SPRUCE: 117, ICON_STAIR_SANDSTONE: 118,
+  ICON_SLAB_SPRUCE: 119, ICON_SLAB_BIRCH: 120,
+  ICON_STAIR_STONE: 121,
+  DARK_LOG_SIDE: 122, DARK_LOG_TOP: 123, DARK_PLANK: 124,
+  IRON_BARS: 125, MAGMA: 126, PACKED_ICE: 127, SEA_LANTERN: 128,
+  CHISELED_BRICKS: 129, TINTED_GLASS: 130, CRYING_OBSIDIAN: 131,
+  NETHERITE_BLOCK: 132, BONE_TOP: 133, BONE_SIDE: 134, AMETHYST: 135,
+  MUSHROOM_RED: 136, MUSHROOM_BROWN: 137, CANE_SIDE: 138, CANE_TOP: 139, LANTERN: 140, SLIME: 141,
+  DUST_OFF: 142, DUST_ON: 143, RTORCH_ON: 144, RTORCH_OFF: 145, LEVER_OFF: 146, LEVER_ON: 147,
+  BUTTON: 148, PLATE: 149, LAMP_OFF: 150, LAMP_ON: 151, SENSOR_TOP: 152, SENSOR_SIDE: 153,
+  SHULKER_SIDE: 154, SHULKER_TOP: 155,
+  REP_TOP: 156, REP_TOP_ON: 157, REP_SIDE: 158,
+  COMP_TOP: 159, COMP_TOP_ON: 160, COMP_SIDE: 161,
+  OBSERVER_SIDE: 162, OBSERVER_FACE: 163, OBSERVER_BACK: 164,
+  PISTON_SIDE: 165, HEAD_SIDE: 166, HEAD_FACE: 167,
+  DISP_SIDE: 168, DISP_HOLE: 169, DROP_SIDE: 170, DROP_HOLE: 171,
+  HOPPER_TOP: 172, HOPPER_SIDE: 173, BULB_OFF: 174, BULB_ON: 175,
+  TARGET_TOP: 176, TARGET_SIDE: 177,
 };
 
 export const WOOL_COLORS = [
@@ -141,6 +182,82 @@ def(B.FENCE, 'Oak Fence', TILE.PLANK, TILE.PLANK, TILE.PLANK,
 def(B.GLASS_PANE, 'Glass Pane', TILE.GLASS, TILE.GLASS, TILE.GLASS, { shape: 'pane', opaque: false });
 def(B.POPPY, 'Poppy', TILE.POPPY, TILE.POPPY, TILE.POPPY,
   { shape: 'cross', solid: false, opaque: false, needSupport: true });
+def(B.RED_MUSHROOM, 'Red Mushroom', TILE.MUSHROOM_RED, TILE.MUSHROOM_RED, TILE.MUSHROOM_RED,
+  { shape: 'cross', solid: false, opaque: false, needSupport: true });
+def(B.BROWN_MUSHROOM, 'Brown Mushroom', TILE.MUSHROOM_BROWN, TILE.MUSHROOM_BROWN, TILE.MUSHROOM_BROWN,
+  { shape: 'cross', solid: false, opaque: false, needSupport: true });
+def(B.SUGAR_CANE, 'Sugar Cane', TILE.CANE_TOP, TILE.CANE_TOP, TILE.CANE_SIDE,
+  { shape: 'cactus', solid: false, opaque: false, needSupport: true });
+def(B.LANTERN, 'Lantern', TILE.LANTERN, TILE.LANTERN, TILE.LANTERN, { glow: true });
+def(B.SLIME_BLOCK, 'Slime Block', TILE.SLIME, TILE.SLIME, TILE.SLIME);
+def(B.REDSTONE_DUST, 'Redstone Dust', TILE.DUST_OFF, TILE.DUST_OFF, TILE.DUST_OFF,
+  { shape: 'dust', solid: false, opaque: false, needSupport: true });
+def(B.REDSTONE_DUST_ON, 'Redstone Dust', TILE.DUST_ON, TILE.DUST_ON, TILE.DUST_ON,
+  { shape: 'dust', solid: false, opaque: false, needSupport: true, glow: true, item: B.REDSTONE_DUST, hidden: true });
+def(B.RTORCH, 'Redstone Torch', TILE.RTORCH_ON, TILE.RTORCH_ON, TILE.RTORCH_ON,
+  { shape: 'cross', glow: true, solid: false, opaque: false, needSupport: true });
+def(B.RTORCH_OFF, 'Redstone Torch', TILE.RTORCH_OFF, TILE.RTORCH_OFF, TILE.RTORCH_OFF,
+  { shape: 'cross', solid: false, opaque: false, needSupport: true, item: B.RTORCH, hidden: true });
+def(B.LEVER, 'Lever', TILE.LEVER_OFF, TILE.LEVER_OFF, TILE.LEVER_OFF,
+  { shape: 'cross', solid: false, opaque: false, needSupport: true });
+def(B.LEVER_ON, 'Lever', TILE.LEVER_ON, TILE.LEVER_ON, TILE.LEVER_ON,
+  { shape: 'cross', solid: false, opaque: false, needSupport: true, item: B.LEVER, hidden: true });
+def(B.BUTTON, 'Stone Button', TILE.BUTTON, TILE.BUTTON, TILE.BUTTON,
+  { shape: 'plate', solid: false, opaque: false, needSupport: true, plateH: 3 / 16 });
+def(B.BUTTON_ON, 'Stone Button', TILE.BUTTON, TILE.BUTTON, TILE.BUTTON,
+  { shape: 'plate', solid: false, opaque: false, needSupport: true, plateH: 1 / 16, item: B.BUTTON, hidden: true });
+def(B.PLATE, 'Stone Pressure Plate', TILE.PLATE, TILE.PLATE, TILE.PLATE,
+  { shape: 'plate', solid: false, opaque: false, needSupport: true, plateH: 2 / 16 });
+def(B.PLATE_ON, 'Stone Pressure Plate', TILE.PLATE, TILE.PLATE, TILE.PLATE,
+  { shape: 'plate', solid: false, opaque: false, needSupport: true, plateH: 1 / 16, item: B.PLATE, hidden: true });
+def(B.LAMP, 'Redstone Lamp', TILE.LAMP_OFF, TILE.LAMP_OFF, TILE.LAMP_OFF);
+def(B.LAMP_ON, 'Redstone Lamp', TILE.LAMP_ON, TILE.LAMP_ON, TILE.LAMP_ON,
+  { glow: true, item: B.LAMP, hidden: true });
+def(B.SENSOR, 'Daylight Sensor', TILE.SENSOR_TOP, TILE.SENSOR_TOP, TILE.SENSOR_SIDE,
+  { shape: 'slab', opaque: false, colHeight: 0.5, needSupport: true });
+def(B.SHULKER_BOX, 'Shulker Box', TILE.SHULKER_TOP, TILE.SHULKER_TOP, TILE.SHULKER_SIDE);
+// repeaters & comparators: 4 facings (0:+x 1:-x 2:+z 3:-z) x off/on
+{
+  const repOff = [B.REPEATER, B.REPEATER + 1, B.REPEATER + 2, B.REPEATER + 3];
+  for (let i = 0; i < 4; i++) {
+    def(B.REPEATER + i, 'Redstone Repeater', TILE.REP_TOP, TILE.REP_SIDE, TILE.REP_SIDE, {
+      shape: 'repeater', opaque: false, colHeight: 0.5, needSupport: true,
+      facing: i, facings: repOff, item: B.REPEATER, hidden: i > 0,
+    });
+    def(B.REPEATER + 4 + i, 'Redstone Repeater', TILE.REP_TOP_ON, TILE.REP_SIDE, TILE.REP_SIDE, {
+      shape: 'repeater', opaque: false, colHeight: 0.5, needSupport: true, glow: true,
+      facing: i, item: B.REPEATER, hidden: true,
+    });
+  }
+  const compOff = [B.COMPARATOR, B.COMPARATOR + 1, B.COMPARATOR + 2, B.COMPARATOR + 3];
+  for (let i = 0; i < 4; i++) {
+    def(B.COMPARATOR + i, 'Redstone Comparator', TILE.COMP_TOP, TILE.COMP_SIDE, TILE.COMP_SIDE, {
+      shape: 'repeater', comp: true, opaque: false, colHeight: 0.5, needSupport: true,
+      facing: i, facings: compOff, item: B.COMPARATOR, hidden: i > 0,
+    });
+    def(B.COMPARATOR + 4 + i, 'Redstone Comparator', TILE.COMP_TOP_ON, TILE.COMP_SIDE, TILE.COMP_SIDE, {
+      shape: 'repeater', comp: true, opaque: false, colHeight: 0.5, needSupport: true, glow: true,
+      facing: i, item: B.COMPARATOR, hidden: true,
+    });
+  }
+}
+def(B.OBSERVER, 'Observer', TILE.OBSERVER_SIDE, TILE.OBSERVER_SIDE, TILE.OBSERVER_SIDE,
+  { shape: 'frontplate', plate: TILE.OBSERVER_FACE, back: TILE.OBSERVER_BACK });
+def(B.OBSERVER_ON, 'Observer', TILE.OBSERVER_SIDE, TILE.OBSERVER_SIDE, TILE.OBSERVER_SIDE,
+  { shape: 'frontplate', plate: TILE.OBSERVER_FACE, back: TILE.OBSERVER_BACK, item: B.OBSERVER, hidden: true });
+def(B.PISTON, 'Piston', TILE.HEAD_FACE, TILE.PISTON_SIDE, TILE.PISTON_SIDE, { opaque: false });
+def(B.STICKY_PISTON, 'Sticky Piston', TILE.HEAD_FACE, TILE.PISTON_SIDE, TILE.PISTON_SIDE, { opaque: false });
+def(B.PISTON_HEAD, 'Piston Head', TILE.HEAD_SIDE, TILE.HEAD_SIDE, TILE.HEAD_SIDE,
+  { shape: 'pistonhead', opaque: false, hidden: true });
+def(B.DISPENSER, 'Dispenser', TILE.DISP_SIDE, TILE.DISP_SIDE, TILE.DISP_SIDE,
+  { shape: 'frontplate', plate: TILE.DISP_HOLE });
+def(B.DROPPER, 'Dropper', TILE.DROP_SIDE, TILE.DROP_SIDE, TILE.DROP_SIDE,
+  { shape: 'frontplate', plate: TILE.DROP_HOLE });
+def(B.HOPPER, 'Hopper', TILE.HOPPER_TOP, TILE.HOPPER_SIDE, TILE.HOPPER_SIDE);
+def(B.BULB, 'Copper Bulb', TILE.BULB_OFF, TILE.BULB_OFF, TILE.BULB_OFF);
+def(B.BULB_ON, 'Copper Bulb', TILE.BULB_ON, TILE.BULB_ON, TILE.BULB_ON,
+  { glow: true, item: B.BULB, hidden: true });
+def(B.TARGET, 'Target', TILE.TARGET_TOP, TILE.TARGET_TOP, TILE.TARGET_SIDE);
 def(B.DANDELION, 'Dandelion', TILE.DANDELION, TILE.DANDELION, TILE.DANDELION,
   { shape: 'cross', solid: false, opaque: false, needSupport: true });
 
@@ -155,6 +272,7 @@ defSlab(B.SANDSTONE_SLAB, 'Sandstone Slab', TILE.SANDSTONE_TOP, TILE.SANDSTONE_T
 
 // stairs: the high step faces STAIR_DIRS[facing]; variants 1-3 are hidden placement states
 export const STAIR_DIRS = [[1, 0], [0, 1], [-1, 0], [0, -1]];
+const PISTON_DIRS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
 const defStairs = (baseId, name, top, bottom, side, icon) => {
   const facings = [baseId, baseId + 1, baseId + 2, baseId + 3];
   for (let i = 0; i < 4; i++) {
@@ -168,6 +286,20 @@ defStairs(B.OAK_STAIRS, 'Oak Stairs', TILE.PLANK, TILE.PLANK, TILE.PLANK, TILE.I
 defStairs(B.COBBLE_STAIRS, 'Cobblestone Stairs', TILE.COBBLE, TILE.COBBLE, TILE.COBBLE, TILE.ICON_STAIR_COBBLE);
 defStairs(B.STONE_BRICK_STAIRS, 'Stone Brick Stairs', TILE.STONE_BRICK, TILE.STONE_BRICK, TILE.STONE_BRICK, TILE.ICON_STAIR_STONE_BRICK);
 defStairs(B.BRICK_STAIRS, 'Brick Stairs', TILE.BRICKS, TILE.BRICKS, TILE.BRICKS, TILE.ICON_STAIR_BRICK);
+defStairs(B.STONE_STAIRS, 'Stone Stairs', TILE.SMOOTH_STONE, TILE.SMOOTH_STONE, TILE.SMOOTH_STONE, TILE.ICON_STAIR_STONE);
+
+def(B.DARK_LOG, 'Dark Oak Log', TILE.DARK_LOG_TOP, TILE.DARK_LOG_TOP, TILE.DARK_LOG_SIDE);
+def(B.DARK_PLANK, 'Dark Oak Planks', TILE.DARK_PLANK, TILE.DARK_PLANK, TILE.DARK_PLANK);
+def(B.IRON_BARS, 'Iron Bars', TILE.IRON_BARS, TILE.IRON_BARS, TILE.IRON_BARS, { shape: 'pane', opaque: false });
+def(B.MAGMA, 'Magma Block', TILE.MAGMA, TILE.MAGMA, TILE.MAGMA, { glow: true });
+def(B.PACKED_ICE, 'Packed Ice', TILE.PACKED_ICE, TILE.PACKED_ICE, TILE.PACKED_ICE, { slip: 0.96 });
+def(B.SEA_LANTERN, 'Sea Lantern', TILE.SEA_LANTERN, TILE.SEA_LANTERN, TILE.SEA_LANTERN, { glow: true });
+def(B.CHISELED_BRICKS, 'Chiseled Stone Bricks', TILE.CHISELED_BRICKS, TILE.CHISELED_BRICKS, TILE.CHISELED_BRICKS);
+def(B.TINTED_GLASS, 'Tinted Glass', TILE.TINTED_GLASS, TILE.TINTED_GLASS, TILE.TINTED_GLASS, { opaque: false });
+def(B.CRYING_OBSIDIAN, 'Crying Obsidian', TILE.CRYING_OBSIDIAN, TILE.CRYING_OBSIDIAN, TILE.CRYING_OBSIDIAN, { glow: true });
+def(B.NETHERITE_BLOCK, 'Netherite Block', TILE.NETHERITE_BLOCK, TILE.NETHERITE_BLOCK, TILE.NETHERITE_BLOCK);
+def(B.BONE_BLOCK, 'Bone Block', TILE.BONE_TOP, TILE.BONE_TOP, TILE.BONE_SIDE);
+def(B.AMETHYST, 'Amethyst Block', TILE.AMETHYST, TILE.AMETHYST, TILE.AMETHYST, { glow: true });
 
 export const WOOL_IDS = [B.WOOL];
 WOOL_COLORS.forEach(([wname], i) => {
@@ -210,6 +342,23 @@ WOOL_COLORS.forEach(([wname], i) => {
   });
 }
 
+// --- new blocks --------------------------------------------------------------
+def(B.COAL_BLOCK, 'Coal Block', TILE.COAL_BLOCK, TILE.COAL_BLOCK, TILE.COAL_BLOCK);
+def(B.JACK_O_LANTERN, "Jack o'Lantern", TILE.PUMPKIN_TOP, TILE.PUMPKIN_TOP, TILE.JACK_SIDE, { glow: true });
+def(B.MOSSY_STONE_BRICK, 'Mossy Stone Bricks', TILE.MOSSY_STONE_BRICK, TILE.MOSSY_STONE_BRICK, TILE.MOSSY_STONE_BRICK);
+defStairs(B.SPRUCE_STAIRS, 'Spruce Stairs', TILE.SPRUCE_PLANK, TILE.SPRUCE_PLANK, TILE.SPRUCE_PLANK, TILE.ICON_STAIR_SPRUCE);
+defStairs(B.SANDSTONE_STAIRS, 'Sandstone Stairs', TILE.SANDSTONE_TOP, TILE.SANDSTONE_TOP, TILE.SANDSTONE_SIDE, TILE.ICON_STAIR_SANDSTONE);
+def(B.BLUE_ORCHID, 'Blue Orchid', TILE.BLUE_ORCHID, TILE.BLUE_ORCHID, TILE.BLUE_ORCHID,
+  { shape: 'cross', solid: false, opaque: false, needSupport: true });
+def(B.ALLIUM, 'Allium', TILE.ALLIUM, TILE.ALLIUM, TILE.ALLIUM,
+  { shape: 'cross', solid: false, opaque: false, needSupport: true });
+def(B.COBWEB, 'Cobweb', TILE.COBWEB, TILE.COBWEB, TILE.COBWEB, { solid: false, opaque: false });
+def(B.ENCHANT_TABLE, 'Enchanting Table', TILE.ENCHANT_TOP, TILE.OBSIDIAN, TILE.ENCHANT_SIDE);
+def(B.JUKEBOX, 'Jukebox', TILE.JUKEBOX_TOP, TILE.PLANK, TILE.JUKEBOX_SIDE);
+def(B.NOTE_BLOCK, 'Note Block', TILE.NOTE_BLOCK, TILE.NOTE_BLOCK, TILE.NOTE_BLOCK);
+defSlab(B.SPRUCE_SLAB, 'Spruce Slab', TILE.SPRUCE_PLANK, TILE.SPRUCE_PLANK, TILE.SPRUCE_PLANK, TILE.ICON_SLAB_SPRUCE);
+defSlab(B.BIRCH_SLAB, 'Birch Slab', TILE.BIRCH_PLANK, TILE.BIRCH_PLANK, TILE.BIRCH_PLANK, TILE.ICON_SLAB_BIRCH);
+
 export const isSolid = (id) => !!(BLOCKS[id] && BLOCKS[id].solid);
 export const isOpaque = (id) => !!(BLOCKS[id] && BLOCKS[id].opaque);
 
@@ -242,6 +391,66 @@ export function blockBoxes(id, conn = null) {
       ];
     }
     case 'cactus': return [bx(1 / 16, 0, 1 / 16, 15 / 16, 1, 15 / 16)];
+    case 'dust': { // redstone wire: center pad + arms toward connected dust
+      const c = conn || {};
+      const h = 2 / 16;
+      const boxes = [bx(6 / 16, 0, 6 / 16, 10 / 16, h, 10 / 16)];
+      if (c.nx) boxes.push(bx(0, 0, 7 / 16, 6 / 16, h, 9 / 16));
+      if (c.px) boxes.push(bx(10 / 16, 0, 7 / 16, 1, h, 9 / 16));
+      if (c.nz) boxes.push(bx(7 / 16, 0, 0, 9 / 16, h, 6 / 16));
+      if (c.pz) boxes.push(bx(7 / 16, 0, 10 / 16, 9 / 16, h, 1));
+      return boxes;
+    }
+    case 'plate': return [bx(1 / 16, 0, 1 / 16, 15 / 16, blk.plateH || 2 / 16, 15 / 16)];
+    case 'repeater': {
+      // slab base + torch nubs: input (back), output (front), delay slider / side inputs
+      const c = conn || {};
+      const f = c.facing || 0;
+      const [dx, dz] = [[1, 0], [-1, 0], [0, 1], [0, -1]][f];
+      const boxes = [bx(0, 0, 0, 1, 8 / 16, 1)];
+      const nub = (ox, oz, h) => boxes.push(bx(ox - 1 / 16, 8 / 16, oz - 1 / 16, ox + 1 / 16, 8 / 16 + h, oz + 1 / 16));
+      const cx = 8 / 16, cz = 8 / 16;
+      nub(cx - dx * 5 / 16, cz - dz * 5 / 16, 4 / 16); // input torch (back)
+      if (blk.comp) {
+        nub(cx + dz * 5 / 16, cz + dx * 5 / 16, 4 / 16); // left side input
+        nub(cx - dz * 5 / 16, cz - dx * 5 / 16, 4 / 16); // right side input
+        nub(cx + dx * 5 / 16, cz + dz * 5 / 16, c.sub ? 7 / 16 : 4 / 16); // output (tall in subtract mode)
+      } else {
+        const slide = ((c.delay || 1) - 1) * 2 / 16;
+        nub(cx - dx * slide, cz - dz * slide, 3 / 16); // delay slider
+        nub(cx + dx * 5 / 16, cz + dz * 5 / 16, 4 / 16); // output torch (front)
+      }
+      return boxes;
+    }
+    case 'pistonhead': {
+      const f = (conn && conn.f) || 0;
+      const [dx, dy, dz] = PISTON_DIRS[f];
+      const boxes = [];
+      if (dx !== 0) boxes.push(bx(0, 6 / 16, 6 / 16, 1, 10 / 16, 10 / 16)); // arm
+      else if (dy !== 0) boxes.push(bx(6 / 16, 0, 6 / 16, 10 / 16, 1, 10 / 16));
+      else boxes.push(bx(6 / 16, 6 / 16, 0, 10 / 16, 10 / 16, 1));
+      const p = { top: TILE.HEAD_FACE, bottom: TILE.HEAD_FACE, side: TILE.HEAD_FACE };
+      if (dx > 0) boxes.push({ x0: 12 / 16, y0: 0, z0: 0, x1: 1, y1: 1, z1: 1, ...p });
+      else if (dx < 0) boxes.push({ x0: 0, y0: 0, z0: 0, x1: 4 / 16, y1: 1, z1: 1, ...p });
+      else if (dy > 0) boxes.push({ x0: 0, y0: 12 / 16, z0: 0, x1: 1, y1: 1, z1: 1, ...p });
+      else if (dy < 0) boxes.push({ x0: 0, y0: 0, z0: 0, x1: 1, y1: 4 / 16, z1: 1, ...p });
+      else if (dz > 0) boxes.push({ x0: 0, y0: 0, z0: 12 / 16, x1: 1, y1: 1, z1: 1, ...p });
+      else boxes.push({ x0: 0, y0: 0, z0: 0, x1: 1, y1: 1, z1: 4 / 16, ...p });
+      return boxes;
+    }
+    case 'frontplate': {
+      const f = (conn && conn.f) || 0;
+      const boxes = [bx(0, 0, 0, 1, 1, 1)];
+      const P = [
+        [14 / 16, 5 / 16, 5 / 16, 1, 11 / 16, 11 / 16], [0, 5 / 16, 5 / 16, 2 / 16, 11 / 16, 11 / 16],
+        [5 / 16, 14 / 16, 5 / 16, 11 / 16, 1, 11 / 16], [5 / 16, 0, 5 / 16, 11 / 16, 2 / 16, 11 / 16],
+        [5 / 16, 5 / 16, 14 / 16, 11 / 16, 11 / 16, 1], [5 / 16, 5 / 16, 0, 11 / 16, 11 / 16, 2 / 16],
+      ];
+      const q = P[f], qb = P[f ^ 1];
+      boxes.push({ x0: q[0], y0: q[1], z0: q[2], x1: q[3], y1: q[4], z1: q[5], top: blk.plate, bottom: blk.plate, side: blk.plate });
+      if (blk.back != null) boxes.push({ x0: qb[0], y0: qb[1], z0: qb[2], x1: qb[3], y1: qb[4], z1: qb[5], top: blk.back, bottom: blk.back, side: blk.back });
+      return boxes;
+    }
     case 'ladder':
     case 'door': {
       // a thin panel flush against one cell wall; open doors swing 90°
@@ -330,7 +539,7 @@ export function emitCross(buf, x, y, z, tile) {
 
 // ---------------------------------------------------------------------------
 // Texture atlas: 16x8 grid of 16px tiles -> 256x128 canvas.
-const T = 16, COLS = 16, ROWS = 8;
+const T = 16, COLS = 16, ROWS = 12;
 export const ATLAS_COLS = COLS;
 
 const ORE_SPOTS = {
@@ -370,15 +579,31 @@ export function buildAtlas() {
     return [...jitter(inner, 6), 255];
   };
   const brickP = (brick, mortar) => (x, y) => {
-    const off = ((y >> 2) % 2) * 4;
+    const row = y >> 2, off = (row % 2) * 4;
     if (y % 4 === 3 || (x + off) % 8 === 7) return [...jitter(mortar, 5), 255];
-    return [...jitter(brick, 8), 255];
+    const v = (hash2((((x + off) >> 3) + row * 2) | 0, row, 31) - 0.5) * 22; // per-brick tone
+    const c = jitter(brick, 5);
+    return [c[0] + v, c[1] + v, c[2] + v, 255];
   };
   const plankP = (main, groove) => (x, y) => {
     if (y % 4 === 3) return [...jitter(groove, 6), 255];
     if ((y < 4 && x === 3) || (y >= 4 && y < 8 && x === 11) || (y >= 8 && y < 12 && x === 6) || (y >= 12 && x === 13))
       return [...jitter(groove, 6), 255];
     return [...jitter(main, 8), 255];
+  };
+  // MC-style clustered tones: NxN tonal cells + fine grain (deterministic per pixel)
+  const cluster = (tones, seed, cell = 2, grain = 6) => (x, y) => {
+    const h = hash2(Math.floor(x / cell), Math.floor(y / cell), seed);
+    const t = tones[Math.min(tones.length - 1, (h * tones.length) | 0)];
+    return [...jitter(t, grain), 255];
+  };
+  // bark: vertical column tones + dark grooves + knots
+  const barkP = (tones, groove, seed) => (x, y) => {
+    if (x % 4 === 0) return [...jitter(groove, 6), 255];
+    if (hash2(x, y, seed + 5) < 0.09) return [...jitter(groove, 8), 255];
+    const h = hash2(x >> 1, 1, seed);
+    const t = tones[Math.min(tones.length - 1, (h * tones.length) | 0)];
+    return [...jitter(t, 7), 255];
   };
   const woolP = (base) => (x, y) => {
     if ((x % 4 === 3 && y % 2 === 0) || (y % 4 === 3 && x % 2 === 1))
@@ -387,51 +612,58 @@ export function buildAtlas() {
   };
 
   const painters = {
-    [TILE.GRASS_TOP]: () => [...jitter([106, 170, 70], 13), 255],
+    [TILE.GRASS_TOP]: cluster([[124, 189, 89], [110, 175, 75], [99, 162, 66], [136, 201, 102]], 11),
     [TILE.GRASS_SIDE]: (x, y) => {
-      const edge = 2 + hash2(x, 0, 42) * 2.2;
-      if (y < edge) return [...jitter([106, 170, 70], 13), 255];
-      return [...jitter([134, 96, 67], 12), 255];
+      const edge = 3 + hash2(x, 0, 42) * 2.4;
+      if (y < edge) return cluster([[124, 189, 89], [110, 175, 75], [99, 162, 66]], 11)(x, y);
+      return painters[TILE.DIRT](x, y);
     },
-    [TILE.DIRT]: () => [...jitter([134, 96, 67], 12), 255],
-    [TILE.STONE]: () => {
-      const c = jitter([127, 127, 127], 9);
-      if (rand() < 0.08) return [c[0] - 24, c[1] - 24, c[2] - 24, 255];
-      return [...c, 255];
+    [TILE.DIRT]: (x, y) => {
+      const h = hash2(x, y, 12);
+      if (h < 0.05) return [...jitter([125, 125, 128], 6), 255]; // pebble
+      if (h < 0.1) return [...jitter([88, 60, 40], 6), 255]; // dark clod
+      return cluster([[134, 96, 67], [122, 86, 59], [145, 106, 75]], 13)(x, y);
     },
+    [TILE.STONE]: cluster([[128, 128, 128], [117, 117, 117], [139, 139, 139], [107, 107, 107]], 17),
     [TILE.COBBLE]: (x, y) => {
-      const seam = x % 4 === 0 || y % 4 === 0 || (x + y) % 8 === 1;
-      const base = seam ? [84, 84, 86] : [118, 118, 120];
-      return [...jitter(base, 8), 255];
+      const lx = x & 3, ly = y & 3;
+      if (lx === 0 || ly === 0) return [...jitter([72, 72, 74], 7), 255]; // seams
+      const v = (hash2(x >> 2, y >> 2, 21) - 0.5) * 30; // per-stone tone
+      const hi = (lx === 1 && ly === 1) ? 14 : 0; // top-left light catch
+      const c = jitter([122, 122, 124], 5);
+      return [c[0] + v + hi, c[1] + v + hi, c[2] + v + hi, 255];
     },
     [TILE.PLANK]: plankP([158, 128, 79], [106, 84, 51]),
-    [TILE.LOG_SIDE]: (x) => {
-      if (x % 4 === 0) return [...jitter([80, 62, 37], 6), 255];
-      return [...jitter([104, 82, 50], 8), 255];
-    },
+    [TILE.LOG_SIDE]: barkP([[106, 84, 52], [96, 76, 46], [116, 92, 58]], [78, 60, 36], 67),
     [TILE.LOG_TOP]: (x, y) => {
       const d = Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5));
+      if (d > 7) return [...jitter([104, 82, 50], 7), 255]; // bark rim
       const ring = Math.floor(d) % 2 === 0;
-      return [...jitter(ring ? [169, 138, 88] : [122, 96, 60], 6), 255];
+      return [...jitter(ring ? [177, 144, 92] : [120, 94, 58], 6), 255];
     },
-    [TILE.LEAVES]: () => {
-      if (rand() < 0.16) return [...jitter([37, 82, 25], 8), 255];
-      return [...jitter([58, 122, 40], 16), 255];
+    [TILE.LEAVES]: (x, y) => {
+      const h = hash2(x, y, 83);
+      if (h < 0.22) return [...jitter([28, 66, 20], 8), 255]; // deep holes
+      if (h < 0.55) return [...jitter([52, 110, 36], 10), 255];
+      return [...jitter([70, 136, 50], 10), 255];
     },
-    [TILE.SAND]: () => [...jitter([219, 206, 160], 10), 255],
+    [TILE.SAND]: cluster([[220, 207, 163], [211, 198, 151], [229, 217, 176]], 23),
     [TILE.GLASS]: (x, y) => {
-      if (x === 0 || y === 0 || x === 15 || y === 15) return [205, 225, 232, 255];
-      const d = x - y;
-      if ((d === 4 || d === 5) && rand() < 0.8) return [255, 255, 255, 150];
+      if (x === 0 || y === 0 || x === 15 || y === 15) return [208, 228, 235, 255];
+      if ((x === 2 && y <= 6) || (y === 2 && x <= 6)) return [235, 245, 250, 200]; // corner streak
       return [0, 0, 0, 0];
     },
-    [TILE.WATER]: () => [...jitter([50, 94, 178], 9), 178],
-    [TILE.SNOW]: () => [...jitter([238, 244, 248], 6), 255],
-    [TILE.SNOW_SIDE]: (x, y) => {
-      if (y < 4) return [...jitter([238, 244, 248], 6), 255];
-      return [...jitter([134, 96, 67], 12), 255];
+    [TILE.WATER]: (x, y) => {
+      const w = hash2(x >> 2, y, 89);
+      const t = w < 0.3 ? [44, 84, 168] : w < 0.7 ? [52, 96, 182] : [62, 110, 196];
+      return [...jitter(t, 6), 178];
     },
-    [TILE.BEDROCK]: () => [...jitter([62, 62, 64], 26), 255],
+    [TILE.SNOW]: cluster([[238, 244, 248], [230, 238, 244], [244, 249, 252]], 101),
+    [TILE.SNOW_SIDE]: (x, y) => {
+      if (y < 4) return cluster([[238, 244, 248], [230, 238, 244]], 101)(x, y);
+      return painters[TILE.DIRT](x, y);
+    },
+    [TILE.BEDROCK]: cluster([[38, 38, 40], [88, 88, 90], [60, 60, 63]], 43, 3, 10),
     [TILE.WOOL]: (x, y) => {
       if ((x % 4 === 3 && y % 2 === 0) || (y % 4 === 3 && x % 2 === 1)) return [...jitter([205, 205, 205], 6), 255];
       return [...jitter([233, 233, 233], 7), 255];
@@ -468,22 +700,22 @@ export function buildAtlas() {
       return [...jitter([112, 112, 115], 8), 255];
     },
     [TILE.LAVA]: (x, y) => {
-      if ((x * 3 + y * 5 + ((x * y) % 4)) % 11 < 3) return [...jitter([250, 190, 45], 15), 255];
-      return [...jitter([228, 105, 20], 20), 255];
+      const h = hash2(x >> 1, y >> 1, 97);
+      if (h < 0.25) return [...jitter([252, 196, 52], 14), 255];
+      if (h < 0.45) return [...jitter([240, 140, 28], 14), 255];
+      return [...jitter([216, 100, 18], 14), 255];
     },
-    [TILE.OBSIDIAN]: () => {
-      if (rand() < 0.09) return [...jitter([74, 44, 116], 12), 255];
-      return [...jitter([24, 18, 34], 7), 255];
+    [TILE.OBSIDIAN]: (x, y) => {
+      if (hash2(x >> 1, y >> 1, 47) < 0.16) return [...jitter([88, 44, 138], 12), 255];
+      return [...jitter([22, 16, 32], 6), 255];
     },
     [TILE.PORTAL]: (x, y) => {
       if ((x * 2 + y * 3 + ((x + y) % 5)) % 9 < 2) return [...jitter([190, 100, 245], 20), 255];
       return [...jitter([98, 32, 165], 22), 255];
     },
-    [TILE.NETHERRACK]: () => {
-      const r = rand();
-      if (r < 0.14) return [...jitter([66, 20, 20], 10), 255];
-      if (r < 0.22) return [...jitter([152, 72, 60], 12), 255];
-      return [...jitter([108, 40, 38], 14), 255];
+    [TILE.NETHERRACK]: (x, y) => {
+      if (hash2(x, y, 54) < 0.08) return [...jitter([60, 26, 26], 8), 255];
+      return cluster([[111, 54, 52], [98, 47, 46], [124, 64, 60]], 53)(x, y);
     },
     [TILE.END_FRAME]: (x, y) => {
       if (x === 0 || y === 0 || x === 15 || y === 15) return [...jitter([144, 152, 116], 8), 255];
@@ -502,9 +734,9 @@ export function buildAtlas() {
       if (r < 0.07) return [...jitter([180, 120, 240], 30), 255];
       return [...jitter([8, 10, 16], 5), 255];
     },
-    [TILE.END_STONE]: () => {
-      if (rand() < 0.2) return [...jitter([200, 203, 158], 8), 255];
-      return [...jitter([219, 222, 177], 9), 255];
+    [TILE.END_STONE]: (x, y) => {
+      if (hash2(x, y, 59) < 0.12) return [...jitter([198, 201, 156], 7), 255];
+      return cluster([[221, 223, 181], [213, 215, 172]], 57)(x, y);
     },
     [TILE.DRAGON_EGG]: () => {
       if (rand() < 0.12) return [...jitter([110, 40, 160], 18), 255];
@@ -531,23 +763,29 @@ export function buildAtlas() {
     [TILE.BRICKS]: brickP([168, 92, 74], [188, 180, 172]),
     [TILE.SANDSTONE_TOP]: solid([220, 207, 160], 7),
     [TILE.SANDSTONE_SIDE]: (x, y) => {
-      if (y < 2 || y > 13) return [...jitter([224, 211, 164], 6), 255];
+      if (y < 2 || y > 13) return [...jitter([226, 213, 166], 6), 255];
+      if (y >= 6 && y <= 9) {
+        const g = (x >= 3 && x <= 5) || (x >= 10 && x <= 12) || y === 7 || y === 8;
+        return [...jitter(g ? [188, 170, 118] : [214, 200, 152], 7), 255];
+      }
       if (hash2(x >> 1, y >> 1, 61) < 0.14) return [...jitter([186, 170, 120], 8), 255];
       return [...jitter([214, 200, 152], 8), 255];
     },
     [TILE.SMOOTH_STONE]: solid([162, 162, 164], 5),
     [TILE.MOSSY_COBBLE]: (x, y) => {
-      const seam = x % 4 === 0 || y % 4 === 0 || (x + y) % 8 === 1;
-      if (hash2(x >> 1, y >> 1, 515) < 0.4) return [...jitter(seam ? [64, 94, 44] : [96, 132, 60], 10), 255];
-      return [...jitter(seam ? [84, 84, 86] : [118, 118, 120], 8), 255];
+      const m = hash2(x >> 1, y >> 1, 515) < 0.45;
+      const lx = x & 3, ly = y & 3;
+      if (lx === 0 || ly === 0) return [...jitter(m ? [62, 90, 42] : [72, 72, 74], 7), 255];
+      const v = (hash2(x >> 2, y >> 2, 21) - 0.5) * 30;
+      const c = jitter(m ? [99, 133, 62] : [122, 122, 124], 6);
+      return [c[0] + v, c[1] + v, c[2] + v, 255];
     },
-    [TILE.GRAVEL]: () => {
-      const r = rand();
-      if (r < 0.25) return [...jitter([98, 88, 82], 8), 255];
-      if (r < 0.5) return [...jitter([146, 138, 130], 8), 255];
-      return [...jitter([122, 112, 106], 9), 255];
+    [TILE.GRAVEL]: (x, y) => {
+      const tones = [[134, 126, 120], [105, 94, 88], [150, 141, 133], [88, 80, 76], [120, 105, 95]];
+      const t = tones[(hash2(x, y, 29) * tones.length) | 0];
+      return [...jitter(t, 7), 255];
     },
-    [TILE.CLAY]: solid([164, 168, 180], 6),
+    [TILE.CLAY]: cluster([[160, 166, 182], [150, 156, 172], [170, 176, 192]], 37),
     [TILE.BOOKSHELF]: (x, y) => {
       if (y < 2 || y > 13 || y === 7 || y === 8 || x === 0 || x === 15)
         return [...jitter([158, 128, 79], 8), 255];
@@ -570,16 +808,9 @@ export function buildAtlas() {
     [TILE.REDSTONE_BLOCK]: bordered([190, 40, 30], [128, 22, 16]),
     [TILE.LAPIS_BLOCK]: bordered([48, 82, 184], [30, 52, 130]),
     [TILE.EMERALD_BLOCK]: bordered([74, 216, 120], [42, 158, 82]),
-    [TILE.BIRCH_LOG]: (x, y) => {
-      if (hash2(x >> 1, y, 133) < 0.15 && y % 3 !== 0) return [...jitter([56, 54, 48], 8), 255];
-      if (x % 4 === 0) return [...jitter([196, 196, 188], 5), 255];
-      return [...jitter([218, 218, 210], 6), 255];
-    },
+    [TILE.BIRCH_LOG]: barkP([[224, 224, 216], [212, 212, 202], [232, 232, 224]], [52, 50, 44], 71),
     [TILE.BIRCH_PLANK]: plankP([198, 180, 134], [156, 138, 96]),
-    [TILE.SPRUCE_LOG]: (x) => {
-      if (x % 4 === 0) return [...jitter([46, 34, 20], 6), 255];
-      return [...jitter([70, 52, 30], 8), 255];
-    },
+    [TILE.SPRUCE_LOG]: barkP([[72, 54, 32], [64, 47, 28], [80, 60, 36]], [44, 32, 19], 73),
     [TILE.SPRUCE_PLANK]: plankP([116, 86, 50], [82, 60, 34]),
     [TILE.PUMPKIN_TOP]: (x, y) => {
       if (Math.abs(x - 7.5) < 1.6 && Math.abs(y - 7.5) < 1.6) return [...jitter([94, 112, 44], 8), 255];
@@ -627,6 +858,219 @@ export function buildAtlas() {
     [TILE.CACTUS_TOP]: (x, y) => {
       if (x < 2 || x > 13 || y < 2 || y > 13) return [...jitter([48, 110, 28], 6), 255];
       return [...jitter([80, 152, 52], 8), 255];
+    },
+    [TILE.MUSHROOM_RED]: (x, y) => {
+      if (x >= 7 && x <= 8 && y >= 9) return [...jitter([232, 224, 208], 8), 255];
+      const fx = x - 7.5, fy = (y - 6.5) * 1.4;
+      if (fx * fx + fy * fy <= 14 && y <= 10) {
+        if ((x === 5 && y === 5) || (x === 10 && y === 5) || (x === 7 && y === 4)) return [245, 240, 230, 255];
+        return [...jitter([200, 40, 32], 12), 255];
+      }
+      return [0, 0, 0, 0];
+    },
+    [TILE.MUSHROOM_BROWN]: (x, y) => {
+      if (x >= 7 && x <= 8 && y >= 9) return [...jitter([228, 220, 204], 8), 255];
+      const fx = x - 7.5, fy = (y - 6.5) * 1.4;
+      if (fx * fx + fy * fy <= 14 && y <= 10) return [...jitter([148, 116, 76], 12), 255];
+      return [0, 0, 0, 0];
+    },
+    [TILE.CANE_SIDE]: (x, y) => {
+      const stalk = x % 4;
+      if (stalk === 3) return [0, 0, 0, 0];
+      if (y % 5 === 4) return [...jitter([86, 140, 60], 10), 255];
+      return [...jitter(stalk === 0 ? [110, 180, 80] : [96, 165, 70], 10), 255];
+    },
+    [TILE.CANE_TOP]: (x, y) => {
+      const d = Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5));
+      if (d > 6) return [0, 0, 0, 0];
+      return [...jitter(d < 2.5 ? [140, 200, 100] : [100, 170, 75], 10), 255];
+    },
+    [TILE.LANTERN]: (x, y) => {
+      if (y < 2 || y > 13 || x < 3 || x > 12) return [...jitter([40, 40, 46], 6), 255];
+      if (x >= 6 && x <= 9 && y >= 5 && y <= 10) return [255, 225, 140, 255];
+      return [...jitter([240, 180, 90], 12), 255];
+    },
+    [TILE.SLIME]: (x, y) => {
+      if (x === 0 || y === 0 || x === 15 || y === 15) return [...jitter([90, 170, 90], 8), 255];
+      const blob = (x - 5) * (x - 5) + (y - 6) * (y - 6) < 7 || (x - 11) * (x - 11) + (y - 10) * (y - 10) < 5;
+      return [...jitter(blob ? [150, 230, 150] : [110, 200, 110], 10), 255];
+    },
+    [TILE.DUST_OFF]: (x, y) => {
+      const arm = (x >= 6 && x <= 9) || (y >= 6 && y <= 9);
+      if (!arm || hash2(x, y, 7) < 0.12) return [0, 0, 0, 0];
+      return [...jitter([140, 30, 22], 10), 255];
+    },
+    [TILE.DUST_ON]: (x, y) => {
+      const arm = (x >= 6 && x <= 9) || (y >= 6 && y <= 9);
+      if (!arm || hash2(x, y, 7) < 0.12) return [0, 0, 0, 0];
+      const hot = x >= 7 && x <= 8 && y >= 7 && y <= 8;
+      return [...jitter(hot ? [255, 120, 90] : [235, 50, 35], 12), 255];
+    },
+    [TILE.RTORCH_ON]: (x, y) => {
+      if (x >= 7 && x <= 8 && y >= 6) return [...jitter([120, 90, 60], 6), 255];
+      if (x >= 6 && x <= 9 && y >= 2 && y <= 5) {
+        if (x >= 7 && x <= 8 && y >= 3 && y <= 4) return [255, 120, 100, 255];
+        return [...jitter([220, 50, 40], 14), 255];
+      }
+      return [0, 0, 0, 0];
+    },
+    [TILE.RTORCH_OFF]: (x, y) => {
+      if (x >= 7 && x <= 8 && y >= 6) return [...jitter([110, 85, 58], 6), 255];
+      if (x >= 6 && x <= 9 && y >= 2 && y <= 5) {
+        if (x >= 7 && x <= 8 && y >= 3 && y <= 4) return [150, 90, 85, 255];
+        return [...jitter([110, 60, 55], 10), 255];
+      }
+      return [0, 0, 0, 0];
+    },
+    [TILE.LEVER_OFF]: (x, y) => {
+      if (y >= 12 && x >= 5 && x <= 10) return [...jitter([110, 110, 115], 6), 255];
+      if (x === 7 && y >= 6 && y < 12) return [...jitter([90, 90, 95], 6), 255];
+      if (x >= 5 && x <= 6 && y >= 4 && y <= 5) return [...jitter([200, 50, 40], 8), 255];
+      return [0, 0, 0, 0];
+    },
+    [TILE.LEVER_ON]: (x, y) => {
+      if (y >= 12 && x >= 5 && x <= 10) return [...jitter([110, 110, 115], 6), 255];
+      if (x === 8 && y >= 6 && y < 12) return [...jitter([90, 90, 95], 6), 255];
+      if (x >= 8 && x <= 9 && y >= 4 && y <= 5) return [255, 90, 70, 255];
+      return [0, 0, 0, 0];
+    },
+    [TILE.BUTTON]: (x, y) => {
+      const d = Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5));
+      if (d > 4) return [0, 0, 0, 0];
+      return [...jitter(d > 3 ? [90, 90, 92] : [140, 140, 144], 8), 255];
+    },
+    [TILE.PLATE]: (x, y) => {
+      if (x === 0 || y === 0 || x === 15 || y === 15) return [...jitter([80, 80, 82], 6), 255];
+      return [...jitter([128, 128, 132], 8), 255];
+    },
+    [TILE.LAMP_OFF]: (x, y) => {
+      if (x % 4 === 0 || y % 4 === 0) return [...jitter([150, 140, 110], 8), 255];
+      return [...jitter([200, 190, 160], 10), 255];
+    },
+    [TILE.LAMP_ON]: (x, y) => {
+      if (x % 4 === 0 || y % 4 === 0) return [...jitter([220, 170, 90], 8), 255];
+      return [255, 225, 150, 255];
+    },
+    [TILE.SENSOR_TOP]: (x, y) => {
+      if (x === 0 || y === 0 || x === 15 || y === 15) return [...jitter([110, 90, 60], 6), 255];
+      if (x % 4 === 0 || y % 4 === 0) return [...jitter([60, 90, 140], 8), 255];
+      return [...jitter([90, 140, 200], 10), 255];
+    },
+    [TILE.SENSOR_SIDE]: (x, y) => {
+      if (y >= 6 && y <= 9) return [...jitter([70, 110, 170], 8), 255];
+      return [...jitter([158, 128, 79], 8), 255];
+    },
+    [TILE.SHULKER_SIDE]: (x, y) => {
+      if (x === 0 || y === 0 || x === 15 || y === 15) return [...jitter([110, 60, 140], 6), 255];
+      const seam = x % 8 === 0 || y % 8 === 0;
+      return [...jitter(seam ? [130, 75, 160] : [155, 100, 185], 8), 255];
+    },
+    [TILE.SHULKER_TOP]: (x, y) => {
+      if (x === 0 || y === 0 || x === 15 || y === 15) return [...jitter([110, 60, 140], 6), 255];
+      const cross = (x >= 6 && x <= 9) || (y >= 6 && y <= 9);
+      return [...jitter(cross ? [175, 120, 205] : [150, 95, 180], 8), 255];
+    },
+    [TILE.REP_TOP]: (x, y) => {
+      if (x === 0 || y === 0 || x === 15 || y === 15) return [...jitter([100, 100, 102], 6), 255];
+      if (x >= 7 && x <= 8 || y >= 7 && y <= 8) return [...jitter([160, 40, 35], 10), 255];
+      return [...jitter([115, 115, 118], 8), 255];
+    },
+    [TILE.REP_TOP_ON]: (x, y) => {
+      if (x === 0 || y === 0 || x === 15 || y === 15) return [...jitter([110, 110, 112], 6), 255];
+      if (x >= 7 && x <= 8 || y >= 7 && y <= 8) return [...jitter([255, 80, 60], 12), 255];
+      return [...jitter([125, 125, 128], 8), 255];
+    },
+    [TILE.REP_SIDE]: (x, y) => {
+      if (y < 3) return [...jitter([170, 50, 42], 8), 255];
+      return [...jitter([110, 110, 112], 8), 255];
+    },
+    [TILE.COMP_TOP]: (x, y) => {
+      if (x === 0 || y === 0 || x === 15 || y === 15) return [...jitter([95, 95, 98], 6), 255];
+      if (x >= 6 && x <= 9 && y >= 6 && y <= 9) return [...jitter([200, 180, 80], 8), 255];
+      if (x >= 7 && x <= 8 || y >= 7 && y <= 8) return [...jitter([160, 40, 35], 10), 255];
+      return [...jitter([110, 110, 113], 8), 255];
+    },
+    [TILE.COMP_TOP_ON]: (x, y) => {
+      if (x === 0 || y === 0 || x === 15 || y === 15) return [...jitter([105, 105, 108], 6), 255];
+      if (x >= 6 && x <= 9 && y >= 6 && y <= 9) return [255, 230, 140, 255];
+      if (x >= 7 && x <= 8 || y >= 7 && y <= 8) return [...jitter([255, 80, 60], 12), 255];
+      return [...jitter([120, 120, 123], 8), 255];
+    },
+    [TILE.COMP_SIDE]: (x, y) => {
+      if (y < 3) return [...jitter([190, 170, 90], 8), 255];
+      return [...jitter([105, 105, 108], 8), 255];
+    },
+    [TILE.OBSERVER_SIDE]: (x, y) => {
+      if (y >= 6 && y <= 9) return [...jitter([160, 40, 35], 10), 255];
+      return [...jitter([90, 90, 95], 8), 255];
+    },
+    [TILE.OBSERVER_FACE]: (x, y) => {
+      if (y >= 5 && y <= 6 && ((x >= 4 && x <= 6) || (x >= 9 && x <= 11))) return [220, 50, 40, 255];
+      if (y >= 10 && y <= 11 && x >= 6 && x <= 9) return [140, 35, 30, 255];
+      return [...jitter([30, 28, 32], 5), 255];
+    },
+    [TILE.OBSERVER_BACK]: (x, y) => {
+      if (x >= 6 && x <= 9 && y >= 6 && y <= 9) return [200, 50, 40, 255];
+      return [...jitter([110, 110, 115], 8), 255];
+    },
+    [TILE.PISTON_SIDE]: (x, y) => {
+      if (y < 4) return [...jitter([130, 128, 125], 6), 255];
+      if (y % 4 === 3) return [...jitter([110, 85, 50], 6), 255];
+      return [...jitter([160, 125, 70], 8), 255];
+    },
+    [TILE.HEAD_SIDE]: () => [...jitter([150, 115, 65], 8), 255],
+    [TILE.HEAD_FACE]: (x, y) => {
+      if (x < 2 || y < 2 || x > 13 || y > 13) return [...jitter([120, 90, 55], 6), 255];
+      if (x >= 6 && x <= 9 && y >= 6 && y <= 9) return [...jitter([100, 75, 45], 6), 255];
+      return [...jitter([175, 140, 85], 8), 255];
+    },
+    [TILE.DISP_SIDE]: (x, y) => {
+      if (x === 0 || y === 0 || x === 15 || y === 15) return [...jitter([85, 85, 88], 6), 255];
+      return [...jitter([120, 120, 122], 8), 255];
+    },
+    [TILE.DISP_HOLE]: (x, y) => {
+      if (x < 2 || y < 2 || x > 13 || y > 13) return [60, 60, 62, 255];
+      return [12, 12, 14, 255];
+    },
+    [TILE.DROP_SIDE]: (x, y) => {
+      if (x === 0 || y === 0 || x === 15 || y === 15) return [...jitter([75, 75, 78], 6), 255];
+      return [...jitter([110, 110, 112], 8), 255];
+    },
+    [TILE.DROP_HOLE]: (x, y) => {
+      if (x < 2 || y < 2 || x > 13 || y > 13) return [70, 70, 72, 255];
+      return [25, 25, 28, 255];
+    },
+    [TILE.HOPPER_TOP]: (x, y) => {
+      if (x < 2 || y < 2 || x > 13 || y > 13) return [...jitter([110, 108, 105], 6), 255];
+      return [...jitter([30, 30, 32], 5), 255];
+    },
+    [TILE.HOPPER_SIDE]: (x, y) => {
+      if (y >= 7 && y <= 8) return [...jitter([80, 78, 75], 6), 255];
+      return [...jitter([105, 103, 100], 8), 255];
+    },
+    [TILE.BULB_OFF]: (x, y) => {
+      if (x >= 4 && x <= 11 && y >= 4 && y <= 11) return [...jitter([50, 45, 40], 6), 255];
+      if (hash2(x, y, 31) < 0.15) return [...jitter([90, 140, 130], 8), 255];
+      return [...jitter([170, 105, 65], 8), 255];
+    },
+    [TILE.BULB_ON]: (x, y) => {
+      if (x >= 4 && x <= 11 && y >= 4 && y <= 11) return [255, 220, 150, 255];
+      if (hash2(x, y, 31) < 0.15) return [...jitter([90, 140, 130], 8), 255];
+      return [...jitter([170, 105, 65], 8), 255];
+    },
+    [TILE.TARGET_TOP]: (x, y) => {
+      const d = Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5)) | 0;
+      if (d <= 1) return [200, 40, 35, 255];
+      if (d <= 3) return [235, 230, 220, 255];
+      if (d <= 5) return [200, 40, 35, 255];
+      return [235, 230, 220, 255];
+    },
+    [TILE.TARGET_SIDE]: (x, y) => {
+      if (y >= 6 && y <= 9) {
+        if (x >= 6 && x <= 9) return [200, 40, 35, 255];
+        return [235, 230, 220, 255];
+      }
+      return [...jitter([190, 170, 120], 8), 255];
     },
     [TILE.TORCH]: (x, y) => {
       if (x >= 7 && x <= 8 && y >= 6) return [...jitter(y > 13 ? [116, 88, 46] : [150, 112, 60], 6), 255];
@@ -689,13 +1133,87 @@ export function buildAtlas() {
       if (x >= 10 && x <= 11 && y >= 9 && y <= 10) return [192, 192, 198, 255]; // knob
       return [...jitter([150, 116, 68], 7), 255];
     },
+    // --- new block textures --------------------------------------------------
+    [TILE.COAL_BLOCK]: (x, y) => {
+      if (x === 0 || y === 0 || x === 15 || y === 15) return [...jitter([20, 20, 24], 4), 255];
+      if (rand() < 0.06) return [...jitter([110, 110, 120], 10), 255]; // glossy specks
+      return [...jitter([42, 42, 48], 7), 255];
+    },
+    [TILE.JACK_SIDE]: (x, y) => {
+      const eye = (cx) => Math.abs(x - cx) + Math.abs(y - 5) <= 2 && y <= 6;
+      const mouth = y >= 10 && y <= 12 && x >= 3 && x <= 12 && ((x + y) % 2 === 0 || y === 11);
+      if (eye(4) || eye(11) || mouth) return [...jitter([255, 196, 70], 12), 255]; // glowing carve
+      return painters[TILE.PUMPKIN_SIDE](x, y);
+    },
+    [TILE.MOSSY_STONE_BRICK]: (x, y) => {
+      if (hash2(x >> 1, y >> 1, 777) < 0.38) return [...jitter([96, 132, 60], 10), 255];
+      return brickP([138, 138, 141], [86, 86, 88])(x, y);
+    },
+    [TILE.BLUE_ORCHID]: (x, y) => {
+      const fx = x - 7.5, fy = y - 4;
+      if (fx * fx + fy * fy <= 6 && y <= 8) {
+        if (Math.abs(fx) < 1 && Math.abs(fy) < 1) return [220, 235, 255, 255];
+        return [...jitter([70, 130, 225], 12), 255];
+      }
+      if (x === 7 && y >= 8) return [...jitter([62, 118, 34], 8), 255];
+      if ((x === 5 || x === 6) && y === 12) return [...jitter([70, 130, 40], 8), 255];
+      return [0, 0, 0, 0];
+    },
+    [TILE.ALLIUM]: (x, y) => {
+      const fx = x - 7.5, fy = y - 3.5;
+      const d2 = fx * fx + fy * fy;
+      if (d2 <= 6.5 && d2 >= 1 && hash2(x, y, 5) < 0.8) return [...jitter([178, 96, 200], 14), 255];
+      if (d2 < 1) return [120, 60, 140, 255];
+      if (x === 8 && y >= 6) return [...jitter([62, 118, 34], 8), 255];
+      if ((x === 10 || x === 11) && y === 12) return [...jitter([70, 130, 40], 8), 255];
+      return [0, 0, 0, 0];
+    },
+    [TILE.COBWEB]: (x, y) => {
+      const dx = Math.abs(x - 7.5), dy = Math.abs(y - 7.5);
+      const spoke = x === y || x + y === 15 || x === 7 || x === 8 || y === 7 || y === 8;
+      const ring = Math.round(dx + dy) % 4 === 0;
+      if (spoke || ring) return [...jitter([222, 224, 228], 8), 235];
+      return [0, 0, 0, 0];
+    },
+    [TILE.ENCHANT_TOP]: (x, y) => {
+      if (x < 2 || y < 2 || x > 13 || y > 13) return [...jitter([24, 18, 34], 7), 255]; // obsidian rim
+      if (x >= 5 && x <= 10 && y >= 4 && y <= 11) {
+        if (x === 7 || x === 8) return [...jitter([240, 235, 220], 6), 255]; // pages seam
+        return [...jitter([160, 40, 44], 10), 255]; // book cover
+      }
+      return [...jitter([30, 22, 40], 7), 255];
+    },
+    [TILE.ENCHANT_SIDE]: (x, y) => {
+      if (y < 3) return [...jitter([80, 220, 210], 10), 255]; // glowing rune strip
+      return [...jitter([24, 18, 34], 7), 255];
+    },
+    [TILE.JUKEBOX_TOP]: (x, y) => {
+      const dx = x - 7.5, dy = y - 7.5;
+      if (dx * dx + dy * dy <= 9) return [...jitter([40, 34, 30], 6), 255];
+      return painters[TILE.PLANK](x, y);
+    },
+    [TILE.JUKEBOX_SIDE]: (x, y) => {
+      if (x >= 4 && x <= 11 && y >= 6 && y <= 11) {
+        if (x >= 6 && x <= 9 && y >= 7 && y <= 9) return [...jitter([30, 26, 24], 5), 255];
+        return [...jitter([90, 70, 44], 6), 255];
+      }
+      return painters[TILE.PLANK](x, y);
+    },
+    [TILE.NOTE_BLOCK]: (x, y) => {
+      if (x >= 4 && x <= 11 && y >= 4 && y <= 11) return [...jitter([232, 228, 220], 5), 255];
+      return painters[TILE.PLANK](x, y);
+    },
   };
   WOOL_COLORS.forEach(([, rgb], i) => { painters[TILE.WOOL0 + i] = woolP(rgb); });
 
   const oreP = (tile) => (x, y) => {
     const { color, spots, base = TILE.STONE } = ORE_SPOTS[tile];
     for (const [sx, sy] of spots) {
-      if ((x - sx) * (x - sx) + (y - sy) * (y - sy) <= 2) return [...jitter(color, 8), 255];
+      const dx = x - sx, dy = y - sy, d2 = dx * dx + dy * dy;
+      if (d2 <= 2) {
+        const k = dx + dy < 0 ? 1.18 : d2 > 1 ? 0.72 : 1; // lit top-left, shaded rim
+        return [...jitter([color[0] * k, color[1] * k, color[2] * k], 7), 255];
+      }
     }
     return painters[base](x, y);
   };
@@ -714,6 +1232,76 @@ export function buildAtlas() {
   painters[TILE.ICON_STAIR_COBBLE] = step(painters[TILE.COBBLE]);
   painters[TILE.ICON_STAIR_STONE_BRICK] = step(painters[TILE.STONE_BRICK]);
   painters[TILE.ICON_STAIR_BRICK] = step(painters[TILE.BRICKS]);
+  painters[TILE.ICON_STAIR_SPRUCE] = step(painters[TILE.SPRUCE_PLANK]);
+  painters[TILE.ICON_STAIR_SANDSTONE] = step(painters[TILE.SANDSTONE_SIDE]);
+  painters[TILE.ICON_SLAB_SPRUCE] = half(painters[TILE.SPRUCE_PLANK]);
+  painters[TILE.ICON_SLAB_BIRCH] = half(painters[TILE.BIRCH_PLANK]);
+  painters[TILE.ICON_STAIR_STONE] = step(painters[TILE.SMOOTH_STONE]);
+  painters[TILE.DARK_LOG_SIDE] = barkP([[68, 52, 34], [60, 45, 29], [76, 58, 38]], [44, 32, 20], 79);
+  painters[TILE.DARK_LOG_TOP] = (x, y) => {
+    const d = Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5));
+    if (d > 7) return [...jitter([66, 50, 32], 7), 255]; // bark rim
+    return [...jitter(Math.floor(d) % 2 === 0 ? [104, 82, 54] : [70, 53, 35], 6), 255];
+  };
+  painters[TILE.DARK_PLANK] = plankP([76, 57, 34], [50, 37, 22]);
+  painters[TILE.IRON_BARS] = (x, y) => {
+    const bar = (x >= 3 && x <= 5) || (x >= 10 && x <= 12) || (y >= 7 && y <= 8);
+    if (!bar) return [0, 0, 0, 0];
+    const edge = x === 3 || x === 5 || x === 10 || x === 12;
+    return [...jitter(edge ? [120, 122, 128] : [185, 188, 195], 7), 255];
+  };
+  painters[TILE.MAGMA] = (x, y) => {
+    const h = hash2(x * 3 + 1, y * 3 + 5, 77);
+    if (h < 0.14) return [...jitter([255, 140, 30], 25), 255];
+    if (h < 0.2) return [...jitter([150, 60, 20], 15), 255];
+    return [...jitter([48, 32, 32], 10), 255];
+  };
+  painters[TILE.PACKED_ICE] = (x, y) => {
+    if ((x + y * 3) % 11 === 0) return [...jitter([235, 248, 252], 4), 255];
+    return [...jitter([175, 215, 238], 7), 255];
+  };
+  painters[TILE.SEA_LANTERN] = (x, y) => {
+    const dot = x % 4 < 2 && y % 4 < 2;
+    if (dot) return [...jitter([240, 252, 246], 6), 255];
+    if ((x + y) % 5 === 0) return [...jitter([140, 190, 180], 8), 255];
+    return [...jitter([205, 232, 224], 8), 255];
+  };
+  painters[TILE.CHISELED_BRICKS] = (x, y) => {
+    const b = x < 2 || y < 2 || x > 13 || y > 13;
+    const dx = Math.abs(x - 7.5), dy = Math.abs(y - 7.5);
+    if (b || dx > 5 || dy > 5) return [...jitter([110, 110, 112], 8), 255];
+    if (dx < 1.5 && dy < 1.5) return [...jitter([70, 70, 72], 6), 255];
+    return [...jitter([135, 135, 137], 7), 255];
+  };
+  painters[TILE.TINTED_GLASS] = (x, y) => {
+    if (x === 0 || y === 0 || x === 15 || y === 15) return [...jitter([52, 50, 58], 5), 255];
+    return [...jitter([24, 22, 30], 4), 255];
+  };
+  painters[TILE.CRYING_OBSIDIAN] = (x, y) => {
+    const h = hash2(x * 2 + 3, y * 2 + 9, 913);
+    if (h < 0.12) return [...jitter([200, 70, 230], 25), 255];
+    return [...jitter([24, 14, 36], 8), 255];
+  };
+  painters[TILE.NETHERITE_BLOCK] = (x, y) => {
+    const b = x < 2 || y < 2 || x > 13 || y > 13 || x === 7 || x === 8;
+    if (b) return [...jitter([95, 92, 98], 7), 255];
+    return [...jitter([58, 56, 62], 8), 255];
+  };
+  painters[TILE.BONE_TOP] = (x, y) => {
+    const d = Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5));
+    if (d > 5.5 || d < 1.5) return [...jitter([200, 193, 175], 8), 255];
+    return [...jitter([228, 222, 204], 6), 255];
+  };
+  painters[TILE.BONE_SIDE] = (x, y) => {
+    if (x >= 6 && x <= 9) return [...jitter([198, 190, 170], 9), 255];
+    return [...jitter([226, 220, 202], 7), 255];
+  };
+  painters[TILE.AMETHYST] = (x, y) => {
+    const h = hash2(x * 4 + 2, y * 4 + 6, 151);
+    if (h < 0.16) return [...jitter([205, 175, 255], 15), 255];
+    if (h < 0.3) return [...jitter([150, 110, 200], 12), 255];
+    return [...jitter([110, 78, 160], 10), 255];
+  };
 
   for (const [tileStr, painter] of Object.entries(painters)) {
     const tile = +tileStr;

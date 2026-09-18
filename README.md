@@ -33,6 +33,17 @@ A 3D Minecraft clone that runs entirely in the browser. No build step, no depend
 - **World persistence** — your edits, inventory, position, and time of day auto-save to `localStorage`
 - **Juice** — block-break particles, procedural sound effects, ambient-occlusion shading, held-item viewmodel, damage vignette
 
+- **Multiplayer (NEW)** — run `node server/mp-server.js` (zero dependencies), press ⛁ Multiplayer, join with friends: shared blocks, live player avatars with nameplates and arm swings, chat, /tell, Tab player list, operator kicks, synced time and weather, death messages, persistent world (`server/db.json`)
+- **Chat & cheat commands (NEW)** — T to chat, / for 20+ commands: /gamemode, /give, /tp, /spawn, /time, /weather, /kill, /heal, /clear, /fly, /summon, /setblock, /locate, /rd, /seed, /me, /list, /tell, /op, /kick (Tab-completion, ↑↓ history)
+- **Tool & armor durability (NEW)** — Minecraft values (gold is fast but fragile), damage bars, items break
+- **Drowning, clouds & rain (NEW)** — air bubbles, drifting blocky clouds, /weather rain with sound and dark skies
+- **More settings (NEW)** — volume and render-distance sliders
+- **Camera modes (V / F5)** — first person, third-person back and front views with an animated player character
+- **Inventory player preview** — a 3D Steve in the inventory that mirrors your equipped armor (drag to rotate)
+- **More blocks & gear** — coal blocks, jack o'lanterns, mossy stone bricks, spruce/sandstone stairs, spruce/birch slabs, blue orchids, alliums, cobwebs (they slow you down!), enchanting tables, jukeboxes (they play music!), note blocks (click to change pitch), plus golden tools and armor
+- **Minecraft-style sound** — material-based digging/breaking/placing, footsteps, UI clicks, splash, jukebox tunes, calm generative music (♫/🔊 toggles in the menu), and a dirt-background menu with splash text
+- **Creative palette tabs** — filter all blocks & items by Blocks / Deco / Gear / Food / Items, middle-click to pick any block
+
 **Getting started:** punch a tree (hold left-click on the trunk) for logs → press **E** → craft planks (2×2 grid) → craft a crafting table → place it and right-click it → craft sticks and a wooden pickaxe (3×3 grid) → mine stone → stone tools → iron → diamond. The recipe list below the grid auto-fills patterns for you.
 
 ## Controls
@@ -55,6 +66,9 @@ In the inventory (Minecraft-style): **left-click** picks up / places / swaps sta
 | **1–9 / scroll** | Select hotbar slot |
 | **F / double-tap Space** | Toggle flight (creative mode only) |
 | **F3** | Debug overlay |
+| **V / F5** | Switch camera (1st person / 3rd person back / front) |
+| **T / /** | Chat / cheat commands |
+| **Tab** | Player list (multiplayer) |
 | **Esc** | Pause / release mouse |
 
 ## Play locally

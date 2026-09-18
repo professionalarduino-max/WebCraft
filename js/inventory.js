@@ -4,9 +4,17 @@
 // Each slot is null or {id, n}.
 
 import { ITEMS, maxStack, ARMOR_SLOTS, SMELTING, FUEL } from './items.js';
+import { B } from './blocks.js';
 
-const enc = (s) => (s ? [s.id, s.n] : null);
-const dec = (v) => (v && v[1] > 0 ? { id: +v[0], n: +v[1] } : null);
+export const encSlot = (s) => {
+  if (!s) return null;
+  const a = (s.d > 0 || s.tag) ? [s.id, s.n, s.d || 0] : [s.id, s.n];
+  if (s.tag) a.push(s.tag); // shulker box contents ride along
+  return a;
+};
+export const decSlot = (v) => (v && v[1] > 0 ? { id: +v[0], n: +v[1], ...(v[2] > 0 ? { d: +v[2] } : null), ...(v[3] ? { tag: v[3] } : null) } : null);
+const enc = encSlot, dec = decSlot;
+const sameTag = (a, b) => (!a && !b) || (!!a && !!b && JSON.stringify(a) === JSON.stringify(b));
 
 export class Inventory {
   constructor() {
@@ -38,6 +46,7 @@ export class Inventory {
       return !!(it && it.kind === 'armor' && ARMOR_SLOTS.indexOf(it.slot) === idx);
     }
     if (area === 'furn' && idx === 2 && this.container && this.container.slots.length === 3) return false;
+    if (area === 'furn' && this.container && this.container.shulker && id === B.SHULKER_BOX) return false; // no nesting
     return true;
   }
 
@@ -56,12 +65,12 @@ export class Inventory {
 
   // Item pickup: fill partial stacks first, then empty slots (hotbar first).
   // Returns the leftover count that did not fit (0 = all stored).
-  add(id, n) {
+  add(id, n, dmg = 0, tag = null) {
     let left = n;
     const lim = maxStack(id);
     for (const s of this.slots) {
       if (left <= 0) break;
-      if (s && s.id === id && s.n < lim) {
+      if (s && s.id === id && s.n < lim && sameTag(s.tag, tag)) {
         const t = Math.min(left, lim - s.n);
         s.n += t; left -= t;
       }
@@ -69,7 +78,7 @@ export class Inventory {
     for (let i = 0; i < 36 && left > 0; i++) {
       if (!this.slots[i]) {
         const t = Math.min(left, lim);
-        this.slots[i] = { id, n: t };
+        this.slots[i] = { id, n: t, ...(dmg > 0 ? { d: dmg } : null), ...(tag ? { tag } : null) };
         left -= t;
       }
     }
@@ -102,7 +111,7 @@ export class Inventory {
     const id = s.id;
     if (!s.n) this.set(area, idx, null);
     this._c();
-    return { id, n: t };
+    return { id, n: t, ...(s.d ? { d: s.d } : null), ...(s.tag ? { tag: s.tag } : null) };
   }
 
   // --- Minecraft mouse semantics -------------------------------------------
@@ -114,7 +123,7 @@ export class Inventory {
       if (s) { this.cursor = s; this.set(area, idx, null); }
     } else if (!this._accepts(area, idx, this.cursor.id)) {
       // take-only / mismatched slot: allow merging OUT of it if ids match
-      if (s && s.id === this.cursor.id) {
+      if (s && s.id === this.cursor.id && sameTag(s.tag, this.cursor.tag)) {
         const lim = maxStack(s.id);
         const t = Math.min(s.n, lim - this.cursor.n);
         this.cursor.n += t; s.n -= t;
@@ -123,7 +132,7 @@ export class Inventory {
     } else if (!s) {
       this.set(area, idx, this.cursor);
       this.cursor = null;
-    } else if (s.id === this.cursor.id) {
+    } else if (s.id === this.cursor.id && sameTag(s.tag, this.cursor.tag)) {
       const lim = maxStack(s.id);
       const t = Math.min(this.cursor.n, lim - s.n);
       s.n += t; this.cursor.n -= t;
@@ -142,17 +151,17 @@ export class Inventory {
     if (!this.cursor) {
       if (s) {
         const t = Math.ceil(s.n / 2);
-        this.cursor = { id: s.id, n: t };
+        this.cursor = { id: s.id, n: t, ...(s.d ? { d: s.d } : null), ...(s.tag ? { tag: s.tag } : null) };
         s.n -= t;
         if (!s.n) this.set(area, idx, null);
       }
     } else if (!this._accepts(area, idx, this.cursor.id)) {
       // no-op on take-only / mismatched slots
     } else if (!s) {
-      this.set(area, idx, { id: this.cursor.id, n: 1 });
+      this.set(area, idx, { id: this.cursor.id, n: 1, ...(this.cursor.d ? { d: this.cursor.d } : null), ...(this.cursor.tag ? { tag: this.cursor.tag } : null) });
       this.cursor.n--;
       if (!this.cursor.n) this.cursor = null;
-    } else if (s.id === this.cursor.id && s.n < maxStack(s.id)) {
+    } else if (s.id === this.cursor.id && s.n < maxStack(s.id) && sameTag(s.tag, this.cursor.tag)) {
       s.n++;
       this.cursor.n--;
       if (!this.cursor.n) this.cursor = null;
@@ -168,7 +177,7 @@ export class Inventory {
     const pull = (arr) => {
       for (let i = 0; i < arr.length; i++) {
         const s = arr[i];
-        if (s && s.id === id && this.cursor.n < lim) {
+        if (s && s.id === id && this.cursor.n < lim && sameTag(s.tag, this.cursor.tag)) {
           const t = Math.min(s.n, lim - this.cursor.n);
           s.n -= t; this.cursor.n += t;
           if (!s.n) arr[i] = null;
@@ -193,14 +202,15 @@ export class Inventory {
   _moveInto(fromArea, fromIdx, toArea, toIdx) {
     const s = this.get(fromArea, fromIdx);
     if (!s) return false;
+    if (!this._accepts(toArea, toIdx, s.id)) return false;
     const t = this.get(toArea, toIdx);
     const lim = maxStack(s.id);
     if (!t) {
-      this.set(toArea, toIdx, { id: s.id, n: s.n });
+      this.set(toArea, toIdx, { id: s.id, n: s.n, ...(s.d ? { d: s.d } : null), ...(s.tag ? { tag: s.tag } : null) });
       this.set(fromArea, fromIdx, null);
       return true;
     }
-    if (t.id === s.id && t.n < lim) {
+    if (t.id === s.id && t.n < lim && sameTag(t.tag, s.tag)) {
       const mv = Math.min(s.n, lim - t.n);
       t.n += mv; s.n -= mv;
       if (!s.n) { this.set(fromArea, fromIdx, null); return true; }
@@ -246,7 +256,7 @@ export class Inventory {
     const lim = maxStack(s.id);
     for (const i of targets) {
       const t = this.slots[i];
-      if (t && t.id === s.id && t.n < lim) {
+      if (t && t.id === s.id && t.n < lim && sameTag(t.tag, s.tag)) {
         const mv = Math.min(s.n, lim - t.n);
         t.n += mv; s.n -= mv;
         if (!s.n) { this.set(area, idx, null); this._c(); return; }
@@ -254,7 +264,7 @@ export class Inventory {
     }
     for (const i of targets) {
       if (!this.slots[i]) {
-        this.slots[i] = { id: s.id, n: s.n };
+        this.slots[i] = { id: s.id, n: s.n, ...(s.d ? { d: s.d } : null), ...(s.tag ? { tag: s.tag } : null) };
         this.set(area, idx, null);
         this._c();
         return;
@@ -271,15 +281,15 @@ export class Inventory {
       const s = this.craft[i];
       if (s) {
         this.craft[i] = null;
-        const left = this.add(s.id, s.n);
-        if (left > 0) leftovers.push({ id: s.id, n: left });
+        const left = this.add(s.id, s.n, s.d || 0, s.tag || null);
+        if (left > 0) leftovers.push({ id: s.id, n: left, ...(s.d ? { d: s.d } : null), ...(s.tag ? { tag: s.tag } : null) });
       }
     }
     if (this.cursor) {
       const c = this.cursor;
       this.cursor = null;
-      const left = this.add(c.id, c.n);
-      if (left > 0) leftovers.push({ id: c.id, n: left });
+      const left = this.add(c.id, c.n, c.d || 0, c.tag || null);
+      if (left > 0) leftovers.push({ id: c.id, n: left, ...(c.d ? { d: c.d } : null), ...(c.tag ? { tag: c.tag } : null) });
     }
     this._c();
     return leftovers;

@@ -45,6 +45,15 @@ function boxCollides(world, e) {
 // Entities may set e.stepHeight (blocks) + e.stepAssistGround (bool) to
 // automatically step up low obstacles (Minecraft: 0.6). Full 1-block walls
 // still stop movement.
+// Would entity `e` collide if its AABB height were `height`? (sneak headroom check)
+export function collidesWithHeight(world, e, height) {
+  const h = e.height;
+  e.height = height;
+  const hit = boxCollides(world, e);
+  e.height = h;
+  return hit;
+}
+
 export function moveEntity(world, e, dt) {
   let onGround = false, hitWall = false;
   const maxDisp = Math.max(Math.abs(e.vel.x), Math.abs(e.vel.y), Math.abs(e.vel.z)) * dt;

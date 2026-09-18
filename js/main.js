@@ -3,19 +3,25 @@
 // HUD, day/night, save/load.
 
 import * as THREE from 'three';
-import { B, BLOCKS, buildAtlas, tileUV, computeAvgColors, isSolid, blockBoxes, emitBox, emitCross } from './blocks.js';
+import { B, BLOCKS, TILE, buildAtlas, tileUV, computeAvgColors, isSolid, blockBoxes, emitBox, emitCross } from './blocks.js';
 import { World, CHUNK, HEIGHT, SEA } from './world.js';
 import { Player } from './player.js';
 import { MobManager, Dragon } from './mobs.js';
 import { blockOverlapsEntity } from './physics.js';
-import { initAudio, sfx } from './sound.js';
+import { initAudio, sfx, music, materialOf, setSoundsEnabled, setVolume, setRain } from './sound.js';
+import { buildPlayerModel, posePlayer } from './playermodel.js';
+import { net, defaultAddr, legacyAddr } from './net.js';
+import { STRUCT_BUILDERS } from './structures.js';
+import { initChat, openChat, chatMessage, chatSys, isChatOpen, submitChat } from './chat.js';
+import { loadWorlds, storeWorlds, saveKeyFor, hashSeed, touchWorld, deleteWorldSave, newWorldId } from './worlds.js';
 import { mulberry32 } from './noise.js';
-import { I, ITEMS, breakInfo, RECIPES, matchGrid, itemIcon, initItemIcons, itemDamage, maxStack, TIER_NAMES, SMELT_TIME } from './items.js';
-import { Inventory } from './inventory.js';
+import { I, ITEMS, breakInfo, RECIPES, matchGrid, itemIcon, initItemIcons, itemDamage, maxStack, maxDamage, TIER_NAMES, SMELT_TIME } from './items.js';
+import { Inventory, encSlot, decSlot } from './inventory.js';
+import { tickRedstone, powerLevelAt, isRep, isComp } from './redstone.js';
 import { DropManager } from './drops.js';
 import { Furnaces, Chests } from './furnace.js';
 
-const SAVE_KEY = 'webcraft_save_v1';
+let SAVE_KEY = 'webcraft_save_v1';
 const PREFS_KEY = 'webcraft_prefs_v1';
 const DAY_LEN = 300; // seconds per full day/night cycle
 const REACH = 4.5;   // Minecraft block reach
@@ -37,7 +43,7 @@ function loadSave() {
 function migrateSave(s) {
   if (!s || s.itemsV2) return s;
   const remap = (id) => (id >= 100 && id < 150 ? id + 100 : id);
-  const remapPair = (v) => (Array.isArray(v) ? [remap(+v[0]), v[1]] : v);
+  const remapPair = (v) => (Array.isArray(v) ? [remap(+v[0]), v[1], ...v.slice(2)] : v);
   const inv = s.inventory;
   if (inv) {
     for (const k of ['slots', 'craft', 'armor']) {
@@ -63,7 +69,7 @@ function migrateSave(s) {
 }
 
 // user preferences (sensitivity, view bobbing)
-let prefs = { sens: 100, bob: true };
+let prefs = { sens: 100, bob: true, music: true, sounds: true, volume: 100, rd: 4, mpName: '' };
 try {
   const raw = localStorage.getItem(PREFS_KEY);
   if (raw) prefs = { ...prefs, ...JSON.parse(raw) };
@@ -73,21 +79,59 @@ function savePrefs() {
 }
 
 const params = new URLSearchParams(location.search);
-const saved = params.has('seed') ? null : loadSave();
-const seed = params.has('seed') ? (parseInt(params.get('seed'), 10) | 0)
-  : saved ? saved.seed
-    : (Math.random() * 0xffffffff) | 0;
-const renderDist = Math.min(8, Math.max(2, parseInt(params.get('rd') || '4', 10) || 4));
-
-// drop ?seed from the URL after boot: the world saves under this seed, so
-// plain refreshes should load the save rather than force-regenerate
-if (params.has('seed')) {
+// multiplayer session (written by the MP screen, survives the join reload)
+// rewrite pre-unification :8081 session addresses (same server, new port)
+function migrateMPAddr(addr) {
+  if (addr === legacyAddr()) return defaultAddr();
   try {
-    const q = new URLSearchParams(params);
-    q.delete('seed');
-    history.replaceState(null, '', location.pathname + (q.toString() ? '?' + q.toString() : ''));
-  } catch (e) { }
+    const u = new URL(addr);
+    const m = location.hostname.match(/^\d+-(.+)$/);
+    const um = u.hostname.match(/^\d+-(.+)$/);
+    if (m && um && um[1] === m[1] && u.hostname !== location.hostname) return defaultAddr();
+  } catch (e) {}
+  return addr;
 }
+let mpSession = null;
+try { mpSession = JSON.parse(sessionStorage.getItem('webcraft_mp') || 'null'); } catch (e) {}
+if (mpSession) {
+  const migrated = migrateMPAddr(mpSession.addr);
+  if (migrated !== mpSession.addr) {
+    mpSession.addr = migrated;
+    try { sessionStorage.setItem('webcraft_mp', JSON.stringify(mpSession)); } catch (e) {}
+  }
+}
+if (mpSession && (!mpSession.addr || !mpSession.name)) mpSession = null;
+// singleplayer world slots
+let currentWorldId = null;
+let curWorld = null;
+if (!mpSession) {
+  const worlds = loadWorlds();
+  try { currentWorldId = sessionStorage.getItem('webcraft_sp'); } catch (e) {}
+  if (!worlds.some(w => w.id === currentWorldId)) {
+    currentWorldId = worlds.length
+      ? worlds.slice().sort((a, b) => (b.lastPlayed || 0) - (a.lastPlayed || 0))[0].id
+      : null;
+  }
+  if (!currentWorldId) {
+    curWorld = { id: newWorldId(), name: 'Новый мир', seed: (Math.random() * 0xffffffff) | 0, mode: 'survival', created: Date.now(), lastPlayed: 0 };
+    worlds.push(curWorld);
+    storeWorlds(worlds);
+    currentWorldId = curWorld.id;
+  } else {
+    curWorld = worlds.find(w => w.id === currentWorldId) || null;
+  }
+  SAVE_KEY = saveKeyFor(currentWorldId);
+  try { sessionStorage.setItem('webcraft_sp', currentWorldId); } catch (e) {}
+} else {
+  // multiplayer worlds save under their own key — singleplayer is untouched
+  SAVE_KEY = 'webcraft_mp_' + ((mpSession.seed >>> 0).toString(36)) + '_v1';
+}
+const saved = loadSave();
+const seed = mpSession ? (mpSession.seed | 0)
+  : saved ? saved.seed
+  : (curWorld ? curWorld.seed : ((Math.random() * 0xffffffff) | 0));
+let renderDist = Math.min(8, Math.max(2, parseInt(params.get('rd') || String(prefs.rd || 4), 10) || 4));
+
 
 // ---------------------------------------------------------------------------
 // Renderer / scene
@@ -134,6 +178,37 @@ const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 1.6, sizeAtten
 const stars = new THREE.Points(starGeo, starMat);
 scene.add(stars);
 
+// blocky drifting clouds + rain streaks (overworld only)
+const cloudGroup = new THREE.Group();
+{
+  const cm = new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, fog: false });
+  const cg = new THREE.BoxGeometry(1, 1, 1);
+  for (let i = 0; i < 16; i++) {
+    const m = new THREE.Mesh(cg, cm);
+    m.scale.set(10 + Math.random() * 22, 1.2, 8 + Math.random() * 16);
+    m.position.set((Math.random() - 0.5) * 320, 96, (Math.random() - 0.5) * 320);
+    m.userData.v = 1 + Math.random() * 1.2;
+    cloudGroup.add(m);
+  }
+}
+scene.add(cloudGroup);
+const RAIN_N = 700;
+const rainGeo = new THREE.BufferGeometry();
+const rainPos = new Float32Array(RAIN_N * 3);
+for (let i = 0; i < RAIN_N; i++) {
+  rainPos[i * 3] = (Math.random() - 0.5) * 44;
+  rainPos[i * 3 + 1] = Math.random() * 30;
+  rainPos[i * 3 + 2] = (Math.random() - 0.5) * 44;
+}
+rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos, 3));
+const rainMat = new THREE.PointsMaterial({ color: 0x9ab4d0, size: 0.12, transparent: true, opacity: 0.7, fog: false, depthWrite: false });
+const rain = new THREE.Points(rainGeo, rainMat);
+rain.visible = false;
+rain.frustumCulled = false;
+scene.add(rain);
+let weatherMode = 'clear'; // 'clear' | 'rain'
+let weatherUntil = 0;      // simTime expiry (0 = indefinite)
+
 // ---------------------------------------------------------------------------
 // Materials from generated atlas
 
@@ -169,7 +244,7 @@ function itemTexture(id) {
 // World / player / inventory
 
 let dim = ['nether', 'end'].includes(saved?.dim) ? saved.dim : 'overworld';
-const worldOver = new World(seed, scene, materials, renderDist, 'overworld');
+const worldOver = new World(seed, scene, materials, renderDist, 'overworld', { gen: curWorld?.type || 'normal', mpSpawn: !!mpSession });
 const worldNether = new World((seed ^ 0x5a17c3) | 0, scene, materials, renderDist, 'nether');
 const worldEnd = new World((seed ^ 0x33cc99) | 0, scene, materials, renderDist, 'end');
 if (saved && saved.edits) {
@@ -181,6 +256,9 @@ if (saved && saved.editsN) {
 if (saved && saved.editsE) {
   for (const [ck, entries] of saved.editsE) worldEnd.edits.set(ck, new Map(entries));
 }
+if (saved && saved.rsData) worldOver.rsDataLoad(saved.rsData);
+if (saved && saved.rsDataN) worldNether.rsDataLoad(saved.rsDataN);
+if (saved && saved.rsDataE) worldEnd.rsDataLoad(saved.rsDataE);
 const dims = {
   overworld: { world: worldOver, portals: saved?.portals?.overworld || [] },
   nether: { world: worldNether, portals: saved?.portals?.nether || [] },
@@ -188,11 +266,12 @@ const dims = {
 };
 let world = dims[dim].world;
 let dragonDefeated = !!saved?.dragonDefeated;
+let oneblockPhase = saved?.oneblock | 0 || 0;
 let dragon = null;
 
 const spawnPoint = worldOver.findSpawn();
 const player = new Player(world, spawnPoint);
-player.gameMode = saved?.gameMode === 'creative' ? 'creative' : 'survival';
+player.gameMode = saved?.gameMode === 'creative' || (!saved && curWorld && curWorld.mode === 'creative') ? 'creative' : 'survival';
 const isCreative = () => player.gameMode === 'creative';
 if (saved && saved.player) {
   player.pos = { ...saved.player.pos };
@@ -212,6 +291,7 @@ function applySensitivity() {
   player.lookFactor = f * f * f * 8 * 0.15 * (Math.PI / 180) * 0.35;
 }
 applySensitivity();
+setSoundsEnabled(prefs.sounds !== false);
 
 const inventory = Inventory.from(saved?.inventory);
 const isNewPlayer = !saved?.inventory;
@@ -219,7 +299,15 @@ const isNewPlayer = !saved?.inventory;
 const furnaces = new Furnaces();
 if (saved?.furnaces) furnaces.load(saved.furnaces);
 const chests = new Chests();
+const shulkers = new Chests(); // shulker boxes reuse the chest container (27 slots)
+const dispensers = new Chests(9);
+const droppers = new Chests(9);
+const hoppers = new Chests(5);
+if (saved && saved.dispensers) dispensers.load(saved.dispensers);
+if (saved && saved.droppers) droppers.load(saved.droppers);
+if (saved && saved.hoppers) hoppers.load(saved.hoppers);
 if (saved?.chests) chests.load(saved.chests);
+if (saved?.shulkers) shulkers.load(saved.shulkers);
 if (saved?.player?.spawn) player.spawn = { ...saved.player.spawn };
 if (saved?.player) {
   player.hunger = saved.player.hunger ?? 20;
@@ -361,6 +449,41 @@ function liquidContact(x, y, z) {
   }
 }
 
+// --- liquid flow: water spreads 6, lava spreads 2, falling liquid stays strong ---
+function liquidTick() {
+  const q = world._liqQueue;
+  if (!q || !q.size || !world._liqDist) return;
+  liqTickN++;
+  const lavaTurn = liqTickN % 3 === 0;
+  let n = 0;
+  for (const k of [...q]) {
+    if (n >= 48) break;
+    q.delete(k);
+    const [x, y, z] = k.split(',').map(Number);
+    const id = world.getBlock(x, y, z);
+    if (id !== B.WATER && id !== B.LAVA) continue;
+    if (id === B.LAVA && !lavaTurn) { q.add(k); continue; } // lava waits for its slow tick
+    n++;
+    flowLiquid(x, y, z, id);
+  }
+}
+function flowLiquid(x, y, z, id) {
+  const dist = world._liqDist.get(x + ',' + y + ',' + z) ?? 0;
+  if (world.getBlock(x, y - 1, z) === B.AIR) { // pour down (setBlock re-queues via liquidTouch)
+    if (world.setBlock(x, y - 1, z, id)) liquidContact(x, y - 1, z);
+    return;
+  }
+  const maxD = id === B.WATER ? 6 : 2;
+  if (dist >= maxD) return;
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    if (world.getBlock(x + dx, y, z + dz) !== B.AIR) continue;
+    if (world.setBlock(x + dx, y, z + dz, id)) {
+      world._liqDist.set((x + dx) + ',' + y + ',' + (z + dz), dist + 1);
+      liquidContact(x + dx, y, z + dz);
+    }
+  }
+}
+export { liquidTick, liquidContact, worldOver, worldNether, worldEnd, oneblockState, oneblockPick, ONEBLOCK_PHASES, inSpawnRadius, SPAWN_R }; // boot-harness test hooks
 // flood-fill the air inside an obsidian frame; must form a small rectangle
 function floodPortalPlane(sx, sy, sz, axis) {
   const cells = [];
@@ -555,6 +678,7 @@ function leaveEnd() {
 function onDragonDeath() {
   dragonDefeated = true;
   toast('THE ENDER DRAGON HAS BEEN DEFEATED!', 6);
+  sfx.levelup();
   const dp = dragon.pos;
   for (let i = 0; i < 8; i++) {
     setTimeout(() => particles.burst(
@@ -764,10 +888,27 @@ camera.add(heldGroup);
 scene.add(camera);
 let heldMesh = null;
 let swingT = 10;
+let eatT = -1; // food-to-mouth animation progress (0..1, -1 = idle)
 
 function heldId() { const s = inventory.slots[selected]; return s ? s.id : null; }
 
+let armMesh = null; // first-person right arm (always visible, even empty-handed)
+function buildFirstPersonArm() {
+  const g = new THREE.Group();
+  const skin = new THREE.MeshLambertMaterial({ color: 0xc8966c });
+  const shirt = new THREE.MeshLambertMaterial({ color: 0x2fa3a0 });
+  const sleeve = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.5, 0.15), shirt);
+  sleeve.position.set(0.13, -0.34, 0.3);
+  sleeve.rotation.set(-0.5, 0, 0.15);
+  const hand = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.13, 0.15), skin);
+  hand.position.set(0.03, -0.11, 0.07);
+  hand.rotation.x = 0.3;
+  g.add(sleeve, hand);
+  return g;
+}
+
 function updateHeldItem() {
+  if (!armMesh) { armMesh = buildFirstPersonArm(); heldGroup.add(armMesh); }
   if (heldMesh) {
     heldGroup.remove(heldMesh);
     if (heldMesh.userData.ownGeo) heldMesh.geometry.dispose();
@@ -802,6 +943,7 @@ const deathScreen = document.getElementById('deathScreen');
 const heartsEl = document.getElementById('hearts');
 const hotbarEl = document.getElementById('hotbar');
 const debugEl = document.getElementById('debug');
+const obHudEl = document.getElementById('oneblockHud');
 const blockNameEl = document.getElementById('blockname');
 const damageEl = document.getElementById('vignette-damage');
 const underwaterEl = document.getElementById('underwater');
@@ -809,6 +951,8 @@ const invScreen = document.getElementById('invScreen');
 const invMainEl = document.getElementById('invMain');
 const invHotbarRowEl = document.getElementById('invHotbarRow');
 const craftList = document.getElementById('craftList');
+const paletteTabsEl = document.getElementById('paletteTabs');
+const playerRowEl = document.getElementById('playerRow');
 const craftGridEl = document.getElementById('craftGrid');
 const craftOutEl = document.getElementById('craftOut');
 const craftTitleEl = document.getElementById('craftTitle');
@@ -816,6 +960,7 @@ const cursorStackEl = document.getElementById('cursorStack');
 const tooltipEl = document.getElementById('invTooltip');
 const hungerEl = document.getElementById('hunger');
 const armorbarEl = document.getElementById('armorbar');
+const airbarEl = document.getElementById('airbar');
 const fireOverlayEl = document.getElementById('fireOverlay');
 const portalOverlayEl = document.getElementById('portalOverlay');
 const bossbarEl = document.getElementById('bossbar');
@@ -831,7 +976,242 @@ const flameFillEl = document.getElementById('flameFill');
 const progFillEl = document.getElementById('progFill');
 const recipesColEl = document.querySelector('.inv-col.recipes');
 const recipesTitleEl = document.querySelector('.inv-col.recipes h2');
-document.getElementById('seedLabel').textContent = 'seed: ' + (seed >>> 0);
+document.getElementById('seedLabel').textContent = 'сид: ' + (seed >>> 0);
+
+// --- main menu dressing: dirt background, splash text, toggles ----------------
+{
+  const dt = document.createElement('canvas');
+  dt.width = dt.height = 48;
+  const dctx = dt.getContext('2d');
+  dctx.imageSmoothingEnabled = false;
+  dctx.drawImage(atlasCanvas, (TILE.DIRT % 16) * 16, ((TILE.DIRT / 16) | 0) * 16, 16, 16, 0, 0, 48, 48);
+  overlay.style.backgroundImage = `url(${dt.toDataURL()})`;
+  overlay.classList.add('dirt');
+}
+const SPLASHES = [
+  'Руби деревья!', '100% JavaScript!', 'Теперь блоков на 20% больше!',
+  'Крипер? О нет!', 'F5 для селфи!', 'Алмазы тебе!',
+  'Не копай под себя!', 'Работает в браузере!', 'Факелы светятся!',
+  'Бойся зомби!', 'Спи крепко!', 'V = камера!',
+  'Джукбокс внутри!', 'Паутина липкая!', 'Играй с друзьями!',
+  'Торт — это ложь!', 'Осторожно, лава!',
+];
+const splashEl = document.getElementById('splash');
+if (splashEl) splashEl.textContent = SPLASHES[(Math.random() * SPLASHES.length) | 0];
+const musicBtn = document.getElementById('musicBtn');
+const soundBtn = document.getElementById('soundBtn');
+function refreshToggles() {
+  if (musicBtn) musicBtn.textContent = `♫ Музыка: ${prefs.music ? 'ВКЛ' : 'ВЫКЛ'}`;
+  if (soundBtn) soundBtn.textContent = `🔊 Звук: ${prefs.sounds ? 'ВКЛ' : 'ВЫКЛ'}`;
+}
+refreshToggles();
+if (musicBtn) musicBtn.addEventListener('click', () => {
+  prefs.music = !prefs.music; savePrefs(); refreshToggles();
+  if (prefs.music) music.start(); else music.stop();
+});
+if (soundBtn) soundBtn.addEventListener('click', () => {
+  prefs.sounds = !prefs.sounds; savePrefs(); refreshToggles();
+  setSoundsEnabled(prefs.sounds);
+});
+// every menu button clicks like Minecraft
+document.querySelectorAll('.mc-btn').forEach(b =>
+  b.addEventListener('pointerdown', () => sfx.click()));
+
+// --- menu screens: main / singleplayer / multiplayer / settings --------------
+function showScreen(name) {
+  for (const id of ['menuMain', 'menuSingle', 'menuMP', 'menuSettings']) {
+    document.getElementById(id).classList.toggle('show', id === name);
+  }
+  if (name === 'menuMP') refreshMP();
+  if (name === 'menuSingle') renderWorlds();
+}
+document.getElementById('singleBtn').addEventListener('click', () => showScreen('menuSingle'));
+document.getElementById('mpBtn').addEventListener('click', () => { initAudio(); showScreen('menuMP'); });
+document.getElementById('settingsBtn').addEventListener('click', () => { initAudio(); showScreen('menuSettings'); });
+for (const id of ['backSingle', 'backMP', 'backSettings']) {
+  document.getElementById(id).addEventListener('click', () => showScreen('menuMain'));
+}
+
+// --- singleplayer worlds ----------------------------------------------------
+let selectedWorld = currentWorldId;
+function renderWorlds() {
+  const list = document.getElementById('worldList');
+  list.innerHTML = '';
+  const ws = loadWorlds().slice().sort((a, b) => (b.lastPlayed || 0) - (a.lastPlayed || 0));
+  if (!ws.length) {
+    const d = document.createElement('div');
+    d.className = 'world-empty';
+    d.textContent = 'Нет миров — создайте первый!';
+    list.appendChild(d);
+    return;
+  }
+  if (!ws.some(w => w.id === selectedWorld)) selectedWorld = ws[0].id;
+  for (const w of ws) {
+    const row = document.createElement('div');
+    row.className = 'world-row' + (w.id === selectedWorld ? ' sel' : '');
+    const nm = document.createElement('div');
+    nm.className = 'w-name';
+    nm.textContent = w.name + (w.id === currentWorldId ? ' ●' : '');
+    const meta = document.createElement('div');
+    meta.className = 'w-meta';
+    const d = w.lastPlayed ? new Date(w.lastPlayed) : null;
+    meta.textContent = `${w.mode === 'creative' ? 'Творческий' : 'Выживание'} · ${w.type === 'flat' ? 'Плоский' : w.type === 'oneblock' ? 'Один блок' : 'Обычный'} · сид ${w.seed >>> 0}` +
+      (d ? ` · ${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : '');
+    row.append(nm, meta);
+    row.addEventListener('click', () => { selectedWorld = w.id; renderWorlds(); });
+    row.addEventListener('dblclick', () => playWorld(w.id));
+    list.appendChild(row);
+  }
+}
+function playWorld(id) {
+  if (!id) return;
+  if (id === currentWorldId && !mpSession) { startGame(); return; } // already here: just play
+  save();
+  try { sessionStorage.setItem('webcraft_sp', id); sessionStorage.removeItem('webcraft_mp'); } catch (e) {}
+  location.reload();
+}
+document.getElementById('playWorldBtn').addEventListener('click', () => playWorld(selectedWorld));
+document.getElementById('createWorldBtn').addEventListener('click', () => {
+  const name = (document.getElementById('worldName').value || '').trim() || 'Новый мир';
+  const seedStr = (document.getElementById('worldSeed').value || '').trim();
+  const mode = document.getElementById('worldMode').value === 'creative' ? 'creative' : 'survival';
+  const wtype = document.getElementById('worldType').value;
+  const ws = loadWorlds();
+  const w = {
+    id: newWorldId(), name: name.slice(0, 24),
+    seed: seedStr ? hashSeed(seedStr) : ((Math.random() * 0xffffffff) | 0),
+    mode, type: ['flat', 'oneblock'].includes(wtype) ? wtype : 'normal', created: Date.now(), lastPlayed: 0,
+  };
+  ws.push(w);
+  storeWorlds(ws);
+  playWorld(w.id);
+});
+let deleteArmed = false, deleteTimer = 0;
+const deleteWorldBtn = document.getElementById('deleteWorldBtn');
+deleteWorldBtn.addEventListener('click', () => {
+  if (!selectedWorld) return;
+  if (!deleteArmed) {
+    deleteArmed = true;
+    deleteWorldBtn.textContent = '⚠ Точно удалить?';
+    deleteWorldBtn.classList.add('danger');
+    clearTimeout(deleteTimer);
+    deleteTimer = setTimeout(() => {
+      deleteArmed = false;
+      deleteWorldBtn.textContent = 'Удалить';
+      deleteWorldBtn.classList.remove('danger');
+    }, 4000);
+    return;
+  }
+  clearTimeout(deleteTimer);
+  deleteArmed = false;
+  deleteWorldBtn.textContent = 'Удалить';
+  deleteWorldBtn.classList.remove('danger');
+  const ws = loadWorlds().filter(w => w.id !== selectedWorld);
+  deleteWorldSave(selectedWorld);
+  storeWorlds(ws);
+  if (selectedWorld === currentWorldId) {
+    if (!ws.length) {
+      const w = { id: newWorldId(), name: 'Новый мир', seed: (Math.random() * 0xffffffff) | 0, mode: 'survival', created: Date.now(), lastPlayed: 0 };
+      ws.push(w); storeWorlds(ws);
+    }
+    playWorld(ws[0].id);
+  } else {
+    selectedWorld = currentWorldId;
+    renderWorlds();
+  }
+});
+
+// --- multiplayer: one shared server ------------------------------------------
+const mpName = document.getElementById('mpName');
+const mpAddr = document.getElementById('mpAddr');
+const mpJoin = document.getElementById('mpJoin');
+const mpLeave = document.getElementById('mpLeave');
+const mpStatus = document.getElementById('mpStatus');
+let playMPBtn = document.getElementById('playMPBtn');
+if (!playMPBtn && mpStatus) { // stale-cached index.html: build the button ourselves
+  playMPBtn = document.createElement('button');
+  playMPBtn.id = 'playMPBtn';
+  playMPBtn.className = 'mc-btn';
+  playMPBtn.textContent = '\u25B6 Играть';
+  mpStatus.after(playMPBtn);
+}
+if (mpName && !mpName.value) mpName.value = prefs.mpName || ('Steve' + ((Math.random() * 900 + 100) | 0));
+if (prefs.mpAddr === legacyAddr()) { prefs.mpAddr = defaultAddr(); savePrefs(); } // pre-unification :8081 address
+if (mpAddr && !mpAddr.value) mpAddr.value = prefs.mpAddr || defaultAddr();
+function refreshMP() {
+  if (!mpStatus) return;
+  if (playMPBtn) playMPBtn.style.display = mpSession ? 'block' : 'none';
+  if (mpSession) {
+    mpStatus.textContent = net.online ? `Подключено: ${net.name || mpSession.name}` : `Подключение к ${mpSession.addr}…`;
+    mpJoin.style.display = 'none';
+    mpLeave.style.display = '';
+  } else {
+    mpStatus.textContent = 'Общий мир: постройки хранятся на сервере';
+    mpJoin.style.display = '';
+    mpLeave.style.display = 'none';
+  }
+}
+if (mpJoin) mpJoin.addEventListener('click', () => {
+  initAudio();
+  const name = (mpName.value || 'Steve').slice(0, 16);
+  const addr = mpAddr.value.trim();
+  if (!addr) { mpStatus.textContent = 'Введите адрес сервера'; return; }
+  prefs.mpName = name; prefs.mpAddr = addr; savePrefs();
+  mpStatus.textContent = 'Подключение…';
+  save(); // keep the singleplayer world safe first
+  net.connect(addr, name, {
+    onWelcome: (m) => {
+      try { sessionStorage.setItem('webcraft_mp', JSON.stringify({ addr, name: m.name || name, seed: m.seed })); } catch (e) {}
+      try { net.sock && net.sock.close(); } catch (e) {}
+      net.sock = null; net.connected = false;
+      location.reload();
+    },
+    onClose: () => { if (mpStatus.textContent === 'Подключение…') mpStatus.textContent = 'Не удалось подключиться — сервер запущен?'; },
+    onError: () => { if (mpStatus.textContent === 'Подключение…') mpStatus.textContent = 'Ошибка соединения — проверьте адрес'; },
+  });
+  setTimeout(() => {
+    if (mpStatus.textContent === 'Подключение…') {
+      net.disconnect();
+      mpStatus.textContent = 'Время ожидания истекло';
+    }
+  }, 8000);
+});
+if (mpLeave) mpLeave.addEventListener('click', () => {
+  save();
+  try { sessionStorage.removeItem('webcraft_mp'); } catch (e) {}
+  location.reload();
+});
+if (playMPBtn) playMPBtn.addEventListener('click', startGame);
+// volume + render-distance sliders
+const volSlider = document.getElementById('volSlider');
+const volVal = document.getElementById('volVal');
+if (volSlider) {
+  volSlider.value = prefs.volume ?? 100;
+  if (volVal) volVal.textContent = volSlider.value + '%';
+  volSlider.addEventListener('input', () => {
+    prefs.volume = +volSlider.value; savePrefs();
+    if (volVal) volVal.textContent = volSlider.value + '%';
+    setVolume(prefs.volume / 100);
+  });
+}
+const rdSlider = document.getElementById('rdSlider');
+const rdVal = document.getElementById('rdVal');
+if (rdSlider) {
+  rdSlider.value = renderDist;
+  if (rdVal) rdVal.textContent = String(renderDist);
+  rdSlider.addEventListener('input', () => {
+    if (rdVal) rdVal.textContent = rdSlider.value;
+    setRenderDist(+rdSlider.value);
+  });
+}
+setVolume((prefs.volume ?? 100) / 100);
+refreshMP(); // correct Join/Leave visibility from the start
+// after a (re)load there is always a world to enter — SP slot or MP session
+if (mpSession || currentWorldId) {
+  const bootPlay = document.getElementById('playBtn');
+  bootPlay.textContent = '▶ Играть';
+  bootPlay.style.display = 'block';
+}
 
 let blockNameT = 0;
 function toast(text, secs = 1.6) {
@@ -839,6 +1219,19 @@ function toast(text, secs = 1.6) {
   blockNameEl.style.opacity = 1;
   blockNameT = secs;
 }
+
+// --- camera modes (F5 / V): first person, third-person back/front ------------
+let camMode = 0;
+const CAM_NAMES = ['First person', 'Third person (back)', 'Third person (front)'];
+function cycleCamera() {
+  camMode = (camMode + 1) % 3;
+  toast('Camera: ' + CAM_NAMES[camMode], 1.4);
+  sfx.click();
+}
+const playerModel = buildPlayerModel();
+playerModel.group.visible = false;
+scene.add(playerModel.group);
+let armorSig = '';
 
 function iconCanvasFor(id, size = 36) {
   const c = document.createElement('canvas');
@@ -849,6 +1242,47 @@ function iconCanvasFor(id, size = 36) {
   return c;
 }
 
+// --- tool/armor durability -------------------------------------------------
+function damageHeld(amount = 1) {
+  if (isCreative()) return;
+  const s = inventory.slots[selected];
+  if (!s || !maxDamage(s.id)) return;
+  s.d = (s.d || 0) + amount;
+  if (s.d >= maxDamage(s.id)) {
+    toast(`Your ${ITEMS[s.id].name} broke!`, 2);
+    sfx.pop();
+    inventory.slots[selected] = null;
+  }
+  inventory._c();
+}
+function damageArmor() {
+  if (isCreative()) return;
+  const worn = [0, 1, 2, 3].filter(i => inventory.armor[i] && maxDamage(inventory.armor[i].id));
+  if (!worn.length) return;
+  const i = worn[(Math.random() * worn.length) | 0];
+  const s = inventory.armor[i];
+  s.d = (s.d || 0) + 1;
+  if (s.d >= maxDamage(s.id)) {
+    toast(`Your ${ITEMS[s.id].name} broke!`, 2);
+    sfx.pop();
+    inventory.armor[i] = null;
+  }
+  inventory._c();
+}
+function durabilityBar(el, s) {
+  const max = maxDamage(s.id);
+  if (!max || !(s.d > 0)) return;
+  const frac = Math.max(0, 1 - s.d / max);
+  const bar = document.createElement('div');
+  bar.className = 'dbar';
+  const fill = document.createElement('div');
+  fill.className = 'dfill';
+  fill.style.width = (frac * 100).toFixed(0) + '%';
+  fill.style.background = frac > 0.6 ? '#5fd65f' : frac > 0.25 ? '#ffd76e' : '#e05555';
+  bar.appendChild(fill);
+  el.appendChild(bar);
+}
+
 function renderHotbar() {
   hotbarEl.innerHTML = '';
   for (let i = 0; i < 9; i++) {
@@ -857,6 +1291,7 @@ function renderHotbar() {
     const s = inventory.slots[i];
     if (s) {
       slot.appendChild(iconCanvasFor(s.id, 36));
+      durabilityBar(slot, s);
       if (s.n > 1) {
         const cnt = document.createElement('span');
         cnt.className = 'cnt';
@@ -878,6 +1313,7 @@ function setSelected(i) {
 
 let lastHp = -1, lastHunger = -1, lastArmor = -1;
 function updateHearts() {
+  updateAir();
   if (player.hp !== lastHp) {
     lastHp = player.hp;
     let html = '';
@@ -913,6 +1349,20 @@ function updateHearts() {
   }
 }
 
+// air bubbles while diving
+let lastAir = -1;
+function updateAir() {
+  const a = Math.ceil(player.air);
+  const show = !isCreative() && (player.air < 10 || player.eyeInWater);
+  if (airbarEl.style.display === (show ? '' : 'none') && a === lastAir) return;
+  lastAir = a;
+  airbarEl.style.display = show ? '' : 'none';
+  if (!show) return;
+  let html = '';
+  for (let i = 0; i < 10; i++) html += `<span class="${a > i ? 'full' : 'empty'}">\u{1FAE7}</span>`;
+  airbarEl.innerHTML = html;
+}
+
 function updateFurnaceBars() {
   const c = inventory.container;
   if (!c) return;
@@ -921,6 +1371,7 @@ function updateFurnaceBars() {
 }
 
 player.onDamage = () => {
+  if (!['starve', 'drown', 'void', 'suicide'].includes(player.lastDmg)) damageArmor();
   damageEl.style.transition = 'none';
   damageEl.style.opacity = 0.55;
   requestAnimationFrame(() => {
@@ -936,11 +1387,18 @@ function scatterInventory() {
   for (let i = 0; i < 36; i++) if (inventory.slots[i]) { stacks.push(inventory.slots[i]); inventory.slots[i] = null; }
   for (let i = 0; i < 4; i++) if (inventory.armor[i]) { stacks.push(inventory.armor[i]); inventory.armor[i] = null; }
   const p = player.pos;
-  for (const s of stacks) drops.spawn(s.id, s.n, p.x, p.y + 0.6, p.z, { stack: true, ttl: 300 });
+  for (const s of stacks) netDrop(s.id, s.n, p.x, p.y + 0.6, p.z, { stack: true, ttl: 300, dmg: s.d || 0 });
   inventory._c();
 }
 
 player.onDeath = () => {
+  {
+    const nm = (mpSession && net.online) ? net.name : 'You';
+    const msgs = { fall: 'hit the ground too hard', lava: 'tried to swim in lava', fire: 'burned to death', void: 'fell out of the world', starve: 'starved to death', drown: 'drowned', attack: 'was slain', arrow: 'was shot', suicide: 'took the easy way out', generic: 'died' };
+    const dt = `${nm} ${msgs[player.lastDmg] || msgs.generic}`;
+    if (mpSession && net.online) net.sendDied(dt); else chatMessage(dt, '#ff8080');
+  }
+  sfx.die();
   closeInventory(false); // returns crafting grid + cursor to the slots first
   if (!isCreative()) scatterInventory();
   document.exitPointerLock();
@@ -971,7 +1429,7 @@ function applyGameMode(mode, opts = {}) {
   heartsEl.style.display = creative ? 'none' : '';
   hungerEl.style.display = creative ? 'none' : '';
   armorbarEl.style.display = creative ? 'none' : '';
-  modeBtn.textContent = creative ? '⚒ Mode: Creative' : '⚒ Mode: Survival';
+  modeBtn.textContent = creative ? '⚒ Режим: Творческий' : '⚒ Режим: Выживание';
   if (invOpen) renderInvScreen(); // swap recipes <-> block palette
   if (!opts.silent) {
     toast(creative ? 'Creative mode — F to fly, E for all blocks' : 'Survival mode', 3);
@@ -996,12 +1454,24 @@ const slotEls = new Map();    // slotKey -> element (for paint highlights)
 
 const slotKey = (area, idx) => area + ':' + idx;
 
+let dropSeq = 0;
+// spawn a drop and (in MP) broadcast it so friends see it too
+function netDrop(id, n, x, y, z, opts) {
+  const es = drops.spawn(id, n, x, y, z, opts);
+  if (net.online && es) {
+    for (const e of es) {
+      e.nid = net.myId + ':' + (dropSeq++);
+      net.sendDrop(e.nid, e.id, e.n, e.pos.x, e.pos.y, e.pos.z, e.vel.x, e.vel.y, e.vel.z, e.dmg || 0, e.tag || null);
+    }
+  }
+  return es;
+}
 function dropStacks(stacks) {
   if (!stacks || !stacks.length) return;
   const eye = player.eye();
   const dir = player.forwardDir();
   for (const s of stacks) {
-    if (s && s.n > 0) drops.spawn(s.id, s.n, eye.x + dir.x * 0.4, eye.y - 0.3, eye.z + dir.z * 0.4, { stack: true, throwDir: dir });
+    if (s && s.n > 0) netDrop(s.id, s.n, eye.x + dir.x * 0.4, eye.y - 0.3, eye.z + dir.z * 0.4, { stack: true, throwDir: dir, dmg: s.d || 0, tag: s.tag || null });
   }
 }
 
@@ -1049,8 +1519,17 @@ function openInventory(mode = 'inv', contKey = null, contPos = null) {
       fillChestLoot(state, contKey);
     }
     inventory.container = state;
+  } else if (mode === 'shulker') {
+    const [state] = shulkers.get(contKey, true);
+    state.shulker = true; // nesting guard: no shulker inside a shulker
+    inventory.container = state;
+  } else if (mode === 'dispenser' || mode === 'dropper' || mode === 'hopper') {
+    const store = mode === 'dispenser' ? dispensers : mode === 'dropper' ? droppers : hoppers;
+    const [state] = store.get(contKey, true);
+    inventory.container = state;
   }
   invScreen.classList.add('show');
+  if (mode === 'chest' || mode === 'shulker' || mode === 'dispenser' || mode === 'dropper' || mode === 'hopper') sfx.chest(); else sfx.click();
   renderInvScreen();
   if (locked) document.exitPointerLock();
 }
@@ -1064,6 +1543,7 @@ function closeInventory(relock = true) {
   paint = null;
   hoveredSlot = null;
   invScreen.classList.remove('show');
+  sfx.click();
   if (relock && started && !player.dead) canvas.requestPointerLock();
 }
 
@@ -1151,6 +1631,7 @@ function paintRightPlace(area, idx) {
 
 function onSlotMouseDown(e, area, idx) {
   e.preventDefault();
+  if (e.button === 0 || e.button === 2) sfx.click();
   if (e.button === 0) {
     if (e.shiftKey) { inventory.quickMove(area, idx); return; }
     const key = slotKey(area, idx);
@@ -1284,6 +1765,7 @@ function makeSlotEl(area, idx) {
   el.className = 'inv-slot';
   if (s) {
     el.appendChild(iconCanvasFor(s.id, 36));
+    durabilityBar(el, s);
     if (s.n > 1) {
       const cnt = document.createElement('span');
       cnt.className = 'cnt';
@@ -1302,16 +1784,17 @@ function renderInvScreen() {
   slotEls.clear();
 
   const furnaceMode = invMode === 'furnace';
-  const chestMode = invMode === 'chest';
+  const chestMode = invMode === 'chest' || invMode === 'shulker' || invMode === 'dispenser' || invMode === 'dropper' || invMode === 'hopper';
   craftAreaEl.style.display = (furnaceMode || chestMode) ? 'none' : 'flex';
   furnacePanelEl.style.display = furnaceMode ? 'flex' : 'none';
   chestPanelEl.style.display = chestMode ? 'grid' : 'none';
   if (recipesColEl) recipesColEl.style.display = (furnaceMode || chestMode) ? 'none' : '';
+  if (playerRowEl) playerRowEl.style.display = (furnaceMode || chestMode) ? 'none' : 'flex';
 
   if (chestMode) {
-    craftTitleEl.textContent = 'Chest';
+    craftTitleEl.textContent = invMode === 'shulker' ? 'Shulker Box' : invMode === 'dispenser' ? 'Dispenser' : invMode === 'dropper' ? 'Dropper' : invMode === 'hopper' ? 'Hopper' : 'Chest';
     chestPanelEl.innerHTML = '';
-    for (let i = 0; i < 27; i++) chestPanelEl.appendChild(makeSlotEl('furn', i));
+    for (let i = 0; i < (inventory.container ? inventory.container.slots.length : 27); i++) chestPanelEl.appendChild(makeSlotEl('furn', i));
   } else if (furnaceMode) {
     craftTitleEl.textContent = 'Furnace';
     furnInEl.innerHTML = ''; furnFuelEl.innerHTML = ''; furnOutEl.innerHTML = '';
@@ -1377,6 +1860,7 @@ function renderInvScreen() {
     recipesTitleEl.innerHTML = 'All Blocks &amp; Items <span class="tip">click = stack · right = one · shift = to inventory</span>';
     renderPalette();
   } else {
+    if (paletteTabsEl) paletteTabsEl.style.display = 'none';
     recipesTitleEl.innerHTML = 'Recipes <span class="tip">click one to fill the grid</span>';
     for (const rec of RECIPES) {
       const ok = rec.in.every(([id, n]) => inventory.count(id) >= n);
@@ -1404,6 +1888,29 @@ function renderInvScreen() {
 }
 
 // --- creative palette: every block & item, free of charge ------------------
+
+// creative palette categories
+const PALETTE_CATS = [['all', 'All'], ['blocks', 'Blocks'], ['deco', 'Deco'], ['gear', 'Gear'], ['food', 'Food'], ['items', 'Items']];
+let paletteFilter = 'all';
+const DECO_IDS = new Set([
+  B.TORCH, B.POPPY, B.DANDELION, B.BLUE_ORCHID, B.ALLIUM, B.CACTUS,
+  B.FENCE, B.GLASS_PANE, B.LADDER, B.DOOR, B.BED, B.CHEST,
+  B.CRAFTING_TABLE, B.FURNACE, B.BOOKSHELF, B.JUKEBOX, B.NOTE_BLOCK,
+  B.ENCHANT_TABLE, B.PUMPKIN, B.MELON, B.JACK_O_LANTERN, B.COBWEB, B.TNT, B.HAY,
+  B.IRON_BARS, B.SEA_LANTERN, B.AMETHYST, B.TINTED_GLASS, B.BONE_BLOCK,
+  B.REDSTONE_DUST, B.RTORCH, B.LEVER, B.BUTTON, B.PLATE, B.LAMP, B.SENSOR, B.SHULKER_BOX,
+  B.REPEATER, B.COMPARATOR, B.OBSERVER, B.PISTON, B.STICKY_PISTON,
+  B.DISPENSER, B.DROPPER, B.HOPPER, B.BULB, B.TARGET,
+]);
+function categoryOf(id) {
+  const it = ITEMS[id];
+  if (!it) return 'items';
+  if (it.kind === 'food') return 'food';
+  if (it.kind === 'tool' || it.kind === 'armor' || it.kind === 'bow') return 'gear';
+  if (it.kind !== 'block') return 'items';
+  const base = (BLOCKS[id] && BLOCKS[id].item) || id;
+  return DECO_IDS.has(base) ? 'deco' : 'blocks';
+}
 
 const PALETTE_IDS = Object.keys(ITEMS).map(Number).sort((a, b) => a - b);
 
@@ -1435,6 +1942,17 @@ function paletteClick(e, id) {
 }
 
 function renderPalette() {
+  if (paletteTabsEl) {
+    paletteTabsEl.style.display = 'flex';
+    paletteTabsEl.innerHTML = '';
+    for (const [key, label] of PALETTE_CATS) {
+      const t = document.createElement('div');
+      t.className = 'ptab' + (paletteFilter === key ? ' sel' : '');
+      t.textContent = label;
+      t.addEventListener('mousedown', (e) => { e.preventDefault(); paletteFilter = key; sfx.click(); renderInvScreen(); });
+      paletteTabsEl.appendChild(t);
+    }
+  }
   const trash = document.createElement('div');
   trash.className = 'inv-slot trash';
   trash.textContent = '✕';
@@ -1449,6 +1967,7 @@ function renderPalette() {
   craftList.appendChild(trash);
 
   for (const id of PALETTE_IDS) {
+    if (paletteFilter !== 'all' && categoryOf(id) !== paletteFilter) continue;
     const el = document.createElement('div');
     el.className = 'inv-slot';
     el.appendChild(iconCanvasFor(id, 36));
@@ -1456,6 +1975,61 @@ function renderPalette() {
     el.addEventListener('mousedown', (e) => paletteClick(e, id));
     craftList.appendChild(el);
   }
+}
+
+// --- inventory player preview (little 3D Steve, drag to rotate) --------------
+let pvRenderer = null, pvScene = null, pvCam = null, pvModel = null;
+let pvYaw = 0.7, pvCamH = 1.15, pvArmorSig = '';
+function initPlayerPreview() {
+  const canvas = document.getElementById('playerCanvas');
+  if (!canvas) return false;
+  pvRenderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  pvRenderer.setSize(150, 190, false);
+  pvRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  pvScene = new THREE.Scene();
+  pvScene.add(new THREE.HemisphereLight(0xffffff, 0x334455, 0.9));
+  const dl = new THREE.DirectionalLight(0xffffff, 1.1);
+  dl.position.set(2, 4, 3);
+  pvScene.add(dl);
+  const disc = new THREE.Mesh(
+    new THREE.CircleGeometry(0.55, 24),
+    new THREE.MeshBasicMaterial({ color: 0x14161c })
+  );
+  disc.rotation.x = -Math.PI / 2;
+  disc.position.y = 0.01;
+  pvScene.add(disc);
+  pvModel = buildPlayerModel();
+  pvScene.add(pvModel.group);
+  pvCam = new THREE.PerspectiveCamera(32, 150 / 190, 0.1, 20);
+  let dragging = false, lx = 0, ly = 0;
+  canvas.addEventListener('pointerdown', (e) => {
+    dragging = true; lx = e.clientX; ly = e.clientY;
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* noop */ }
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    pvYaw -= (e.clientX - lx) * 0.02;
+    pvCamH = Math.max(0.3, Math.min(1.9, pvCamH + (e.clientY - ly) * 0.01));
+    lx = e.clientX; ly = e.clientY;
+  });
+  const stop = () => { dragging = false; };
+  canvas.addEventListener('pointerup', stop);
+  canvas.addEventListener('pointercancel', stop);
+  return true;
+}
+function renderPlayerPreview() {
+  if (!pvRenderer && !initPlayerPreview()) return;
+  pvModel.group.rotation.y = 0;
+  posePlayer(pvModel, simTime * 1.6, 0.05, 99, false, { t: simTime }); // idle sway + breathe
+  pvModel.group.position.y = Math.sin(simTime * 1.6) * 0.015;
+  const sig = inventory.armor.map(s => (s ? ITEMS[s.id].matKey : '-')).join(',');
+  if (sig !== pvArmorSig) {
+    pvArmorSig = sig;
+    pvModel.setArmor(inventory.armor.map(s => (s ? ITEMS[s.id].matKey : null)));
+  }
+  pvCam.position.set(Math.sin(pvYaw) * 2.7, pvCamH, Math.cos(pvYaw) * 2.7);
+  pvCam.lookAt(0, 0.92, 0);
+  pvRenderer.render(pvScene, pvCam);
 }
 
 inventory.onChange = () => {
@@ -1477,10 +2051,19 @@ let firstStartHint = isNewPlayer;
 
 function isLocked() { return locked || forceStarted; }
 
-document.getElementById('playBtn').addEventListener('click', () => {
+function startGame() {
   initAudio();
-  canvas.requestPointerLock();
-});
+  if (prefs.music) music.start();
+  showScreen('menuMain');
+  try {
+    const p = canvas.requestPointerLock();
+    // Chrome blocks re-lock for ~1.5s after Esc: tell the player to click again
+    if (p && p.catch) p.catch(() => toast('Нажмите ещё раз — браузер отпускает мышь с задержкой', 2.5));
+  } catch (e) {
+    toast('Не удалось захватить мышь — нажмите ещё раз', 2.5);
+  }
+}
+document.getElementById('playBtn').addEventListener('click', startGame);
 
 // Fullscreen + Keyboard Lock: in fullscreen the browser lets us capture
 // shortcuts like Ctrl+W so sprinting can't close the tab.
@@ -1525,33 +2108,7 @@ bobToggle.addEventListener('change', () => {
 // New World: two-click confirm (confirm() dialogs are unreliable in embedded
 // browsers) + suppress further saves so beforeunload can't resurrect the world.
 let wipeSave = false;
-let newWorldArmed = false;
-let newWorldTimer = 0;
-const newWorldBtn = document.getElementById('newWorldBtn');
-newWorldBtn.addEventListener('click', () => {
-  if (!newWorldArmed) {
-    newWorldArmed = true;
-    newWorldBtn.textContent = '⚠ Delete world? Click again';
-    newWorldBtn.classList.add('danger');
-    clearTimeout(newWorldTimer);
-    newWorldTimer = setTimeout(() => {
-      newWorldArmed = false;
-      newWorldBtn.textContent = '✦ New World';
-      newWorldBtn.classList.remove('danger');
-    }, 4000);
-    return;
-  }
-  clearTimeout(newWorldTimer);
-  wipeSave = true;
-  try {
-    // tell every other open game tab to stop saving the old world
-    localStorage.setItem('webcraft_wipe', String(Date.now()));
-    localStorage.removeItem(SAVE_KEY);
-  } catch (e) { }
-  // navigate with an explicit fresh seed: guarantees a new world even if a
-  // stale save somehow survives or reappears
-  location.href = location.pathname + '?seed=' + ((Math.random() * 0xffffffff) >>> 0);
-});
+// (world creation moved to the Singleplayer screen)
 
 // another tab hit New World: stop persisting this tab's (old) world
 window.addEventListener('storage', (e) => {
@@ -1563,16 +2120,18 @@ document.addEventListener('pointerlockchange', () => {
   if (locked) {
     started = true;
     overlay.classList.add('hidden');
-    overlayTitle.textContent = 'PAUSED';
-    document.getElementById('playBtn').textContent = '▶ Resume';
+    overlayTitle.textContent = 'ПАУЗА';
+    const pb = document.getElementById('playBtn');
+    pb.textContent = '▶ Продолжить';
+    pb.style.display = 'block';
     if (firstStartHint) {
       firstStartHint = false;
-      toast('Punch a tree trunk to gather wood — press E to craft!', 8);
+      toast('Добудьте дерево — нажмите E для крафта!', 8);
     }
   } else {
     keys.clear();
     breakingHeld = placingHeld = false;
-    if (!player.dead && !invOpen) overlay.classList.remove('hidden');
+    if (!player.dead && !invOpen && !isChatOpen()) { showScreen('menuMain'); overlay.classList.remove('hidden'); }
   }
 });
 
@@ -1582,6 +2141,13 @@ document.addEventListener('mousemove', (e) => {
 
 let lastSpaceDown = -1;
 document.addEventListener('keydown', (e) => {
+  if (isChatOpen()) return;
+  if ((e.code === 'KeyT' || e.code === 'Enter' || e.code === 'Slash') && isLocked() && !invOpen && !player.dead) {
+    e.preventDefault();
+    openChat(e.code === 'Slash' ? '/' : '');
+    return;
+  }
+  if (e.code === 'Tab' && isLocked() && !invOpen) { e.preventDefault(); showTabList(true); return; }
   if (invOpen) {
     if (e.code === 'KeyE' || e.code === 'Escape') {
       e.preventDefault();
@@ -1596,6 +2162,10 @@ document.addEventListener('keydown', (e) => {
       e.preventDefault();
       throwFromSlot(hoveredSlot.area, hoveredSlot.idx, e.ctrlKey || e.metaKey);
     }
+    return;
+  }
+  if (e.code === 'F5' || e.code === 'KeyV') {
+    if (isLocked() && !invOpen && !player.dead) { e.preventDefault(); cycleCamera(); }
     return;
   }
   if (!isLocked()) return;
@@ -1627,6 +2197,7 @@ document.addEventListener('keydown', (e) => {
 });
 document.addEventListener('keyup', (e) => {
   keys.delete(e.code);
+  if (e.code === 'Tab') showTabList(false);
 });
 window.addEventListener('blur', () => { keys.clear(); breakingHeld = placingHeld = false; });
 
@@ -1684,7 +2255,7 @@ function raycastVoxel(ox, oy, oz, dx, dy, dz, maxDist) {
   while (t <= maxDist) {
     if (t > 0) {
       const b = world.getBlock(x, y, z);
-      if (b !== B.AIR && b !== B.WATER) return { x, y, z, id: b, face: [fx, fy, fz], t };
+      if (b !== B.AIR && b !== B.WATER && b !== B.LAVA) return { x, y, z, id: b, face: [fx, fy, fz], t };
     }
     if (tMX < tMY && tMX < tMZ) { x += stepX; t = tMX; tMX += tDX; fx = -stepX; fy = 0; fz = 0; }
     else if (tMY < tMZ) { y += stepY; t = tMY; tMY += tDY; fx = 0; fy = -stepY; fz = 0; }
@@ -1712,7 +2283,103 @@ function stopMining() {
   crackMesh.visible = false;
 }
 
+// one-block world: phased progression. oneblockPhase = total blocks broken
+// (saved); the current phase is derived from it, so old saves keep working.
+const ONEBLOCK_PHASES = [
+  { icon: '\u{1F331}', name: 'Равнины', need: 30, reward: 'верстак', gift: [[B.CRAFTING_TABLE, 1]], mobs: ['pig'],
+    pool: [[B.GRASS, 4], [B.DIRT, 3], [B.SAND, 1], [B.LOG, 2], [B.PLANK, 1], [B.LEAVES, 1]] },
+  { icon: '\u{1F332}', name: 'Тайга', need: 40, reward: 'факелы ×8', gift: [[B.TORCH, 8]], mobs: ['chicken', 'chicken'],
+    pool: [[B.LOG, 3], [B.SPRUCE_LOG, 2], [B.LEAVES, 3], [B.PLANK, 2], [B.DIRT, 1], [B.GRASS, 1]] },
+  { icon: '\u26CF\uFE0F', name: 'Подземелье', need: 50, reward: 'печь', gift: [[B.FURNACE, 1]], mobs: ['sheep'],
+    pool: [[B.STONE, 4], [B.COBBLE, 3], [B.COAL_ORE, 2], [B.GRAVEL, 2], [B.DIRT, 1]] },
+  { icon: '\u{1FAA8}', name: 'Глубины', need: 60, reward: 'яблоки ×6', gift: [[I.APPLE, 6]], mobs: ['cow'],
+    pool: [[B.STONE, 3], [B.COBBLE, 2], [B.COAL_ORE, 2], [B.IRON_ORE, 2], [B.GRAVEL, 1], [B.CLAY, 1]] },
+  { icon: '\u{1F3DC}\uFE0F', name: 'Оазис', need: 50, reward: 'ведро воды', gift: [[I.WATER_BUCKET, 1]], mobs: ['sheep'],
+    pool: [[B.SAND, 3], [B.SANDSTONE, 2], [B.CLAY, 2], [B.GRAVEL, 1], [B.DIRT, 1], [B.SUGAR_CANE, 1]] },
+  { icon: '\u{1F525}', name: 'Недра', need: 60, reward: 'ведро лавы', gift: [[I.LAVA_BUCKET, 1]], mobs: ['zombie'],
+    pool: [[B.NETHERRACK, 4], [B.GLOWSTONE, 2], [B.QUARTZ_ORE, 2], [B.MAGMA, 1], [B.GRAVEL, 1]] },
+  { icon: '\u{1F48E}', name: 'Сокровища', need: 80, reward: 'золотое яблоко', gift: [[I.GOLDEN_APPLE, 1]], mobs: ['skeleton'],
+    pool: [[B.STONE, 2], [B.COAL_ORE, 1], [B.IRON_ORE, 2], [B.GOLD_ORE, 2], [B.LAPIS_ORE, 1], [B.REDSTONE_ORE, 1], [B.DIAMOND_ORE, 1]] },
+  { icon: '\u{1F30C}', name: 'Край', need: 80, reward: 'жемчуг Края ×2', gift: [[I.ENDER_PEARL, 2]], mobs: ['slime'],
+    pool: [[B.END_STONE, 4], [B.STONE, 2], [B.GLOWSTONE, 2], [B.GOLD_ORE, 1], [B.EMERALD_ORE, 1], [B.DIAMOND_ORE, 1]] },
+  { icon: '\u267E\uFE0F', name: 'Бесконечность', need: Infinity, reward: 'алмазы ×2', gift: [[I.DIAMOND, 2]], mobs: null,
+    pool: [[B.DIAMOND_ORE, 1], [B.GOLD_ORE, 2], [B.IRON_ORE, 3], [B.COAL_ORE, 2], [B.LAPIS_ORE, 1],
+           [B.REDSTONE_ORE, 1], [B.EMERALD_ORE, 1], [B.QUARTZ_ORE, 1], [B.STONE, 2], [B.LOG, 1],
+           [B.GLOWSTONE, 1], [B.END_STONE, 1]] },
+];
+
+// -> { i, ph, inPhase }: phase index, phase def, blocks broken within it
+function oneblockState(total) {
+  let acc = 0;
+  for (let i = 0; i < ONEBLOCK_PHASES.length; i++) {
+    const ph = ONEBLOCK_PHASES[i];
+    if (!isFinite(ph.need) || total < acc + ph.need) return { i, ph, inPhase: total - acc };
+    acc += ph.need;
+  }
+  const i = ONEBLOCK_PHASES.length - 1; // unreachable (last phase is endless)
+  return { i, ph: ONEBLOCK_PHASES[i], inPhase: 0 };
+}
+
+function oneblockPick(ph) {
+  let sum = 0;
+  for (const [, w] of ph.pool) sum += w;
+  let r = Math.random() * sum;
+  for (const [id, w] of ph.pool) { r -= w; if (r <= 0) return id; }
+  return ph.pool[0][0];
+}
+
+// phase-up rewards: gift items + guest mobs on the platform
+function oneblockReward(st, milestone = false) {
+  for (const [id, n] of st.ph.gift) drops.spawn(id, n, 0.5, 64.6, 0.5, { stack: true });
+  let mobNote = '';
+  const guests = st.ph.mobs || (st.i >= ONEBLOCK_PHASES.length - 1
+    ? [['pig', 'sheep', 'cow', 'chicken'][(Math.random() * 4) | 0]] : []);
+  for (const t of guests) {
+    try { mobs.forceSpawn(t, 1.5 + Math.random() * 2, 63.15, 1.5 + Math.random() * 2); } catch (e) {}
+    mobNote = (t === 'zombie' || t === 'skeleton') ? ' \u26A0\uFE0F осторожно, монстр!' : ' + гость \u{1F43E}';
+  }
+  toast(milestone ? `${st.ph.icon} Бесконечность: всего ${oneblockPhase}! Награда: ${st.ph.reward}${mobNote}`
+                  : `${st.ph.icon} Новая фаза: ${st.ph.name}! Награда: ${st.ph.reward}${mobNote}`, 3.5);
+}
+
+// per-frame one-block upkeep: void rescue + infinite-block guard + HUD
+let obHudT = 0;
+function oneblockTick(dt) {
+  if (dim !== 'overworld' || world.gen !== 'oneblock') {
+    if (obHudEl.style.display !== 'none') obHudEl.style.display = 'none';
+    return;
+  }
+  // fell into the void: bounce back onto the island instead of dying
+  if (!player.dead && !isCreative() && player.pos.y < -10) {
+    player.pos.x = 0.5; player.pos.y = 64.1; player.pos.z = 0.5;
+    player.vel.x = 0; player.vel.y = 0; player.vel.z = 0;
+    player.damage(4, simTime, 'void');
+    toast('\u{1F573}\uFE0F Пустота выплюнула тебя обратно на остров!', 2.5);
+  }
+  // the infinite block must never stay gone (explosions, edge cases)
+  if (world.getBlock(0, 63, 0) === B.AIR) {
+    world.setBlock(0, 63, 0, oneblockPick(oneblockState(oneblockPhase).ph));
+  }
+  obHudT -= dt;
+  if (obHudT <= 0) {
+    obHudT = 0.25;
+    const st = oneblockState(oneblockPhase);
+    obHudEl.style.display = 'block';
+    obHudEl.textContent = isFinite(st.ph.need)
+      ? `${st.ph.icon} ${st.ph.name} · ${st.inPhase}/${st.ph.need}`
+      : `${st.ph.icon} ${st.ph.name} · всего ${oneblockPhase}`;
+  }
+}
+
 function finishBreak(hit, info) {
+  if (spawnGuard(hit.x, hit.z)) { stopMining(); return; } // spawn safe zone
+  // one-block safety platform is indestructible (expand with placed blocks)
+  if (dim === 'overworld' && world.gen === 'oneblock' && !isCreative()
+      && hit.y === 62 && hit.x >= 0 && hit.x <= 4 && hit.z >= 0 && hit.z <= 4) {
+    toast('Платформа неразрушаема — копай верхний блок!', 2);
+    stopMining();
+    return;
+  }
   if (info.canHarvest && !isCreative()) { // creative breaks drop nothing
     const d = info.drop(Math.random());
     if (d) drops.spawn(d[0], d[1], hit.x + 0.5, hit.y + 0.35, hit.z + 0.5);
@@ -1720,7 +2387,7 @@ function finishBreak(hit, info) {
   // broken containers spill their contents
   if (hit.id === B.FURNACE) {
     for (const s of furnaces.breakAt(dimPrefix() + furnaces.key(hit.x, hit.y, hit.z))) {
-      drops.spawn(s.id, s.n, hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, { stack: true });
+      drops.spawn(s.id, s.n, hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, { stack: true, dmg: s.d || 0 });
     }
   }
   if (hit.id === B.CHEST) {
@@ -1733,12 +2400,55 @@ function finishBreak(hit, info) {
       spill = tmp.slots.filter(Boolean);
     }
     for (const s of spill) {
-      drops.spawn(s.id, s.n, hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, { stack: true });
+      drops.spawn(s.id, s.n, hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, { stack: true, dmg: s.d || 0 });
+    }
+  }
+  if (hit.id === B.SHULKER_BOX) {
+    // shulker boxes keep their contents when broken (Minecraft)
+    const sk = dimPrefix() + chests.key(hit.x, hit.y, hit.z);
+    const [st] = shulkers.get(sk);
+    shulkers.breakAt(sk);
+    if (!isCreative()) {
+      drops.spawn(B.SHULKER_BOX, 1, hit.x + 0.5, hit.y + 0.5, hit.z + 0.5,
+        { stack: true, tag: { slots: (st ? st.slots : []).map(encSlot) } });
+    }
+  }
+  // piston heads break together with their base (Minecraft drops the base)
+  if (hit.id === B.PISTON_HEAD) {
+    const st = world._rsData ? world._rsData.get(hit.x + ',' + hit.y + ',' + hit.z) : null;
+    if (st && st.f != null) {
+      const [dx, dy, dz] = DIRS6[st.f];
+      const base = world.getBlock(hit.x - dx, hit.y - dy, hit.z - dz);
+      if (base === B.PISTON || base === B.STICKY_PISTON) {
+        world.setBlock(hit.x - dx, hit.y - dy, hit.z - dz, B.AIR);
+        if (!isCreative()) drops.spawn(base, 1, hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, { stack: true });
+      }
+    }
+  }
+  // broken machines spill their contents
+  if (hit.id === B.DISPENSER || hit.id === B.DROPPER || hit.id === B.HOPPER) {
+    const store = hit.id === B.DISPENSER ? dispensers : hit.id === B.DROPPER ? droppers : hoppers;
+    for (const s of store.breakAt(dimPrefix() + chests.key(hit.x, hit.y, hit.z))) {
+      drops.spawn(s.id, s.n, hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, { stack: true, dmg: s.d || 0, tag: s.tag || null });
     }
   }
   player.exhaustion += 0.005;
   // ice melts back into water below sea level
   world.setBlock(hit.x, hit.y, hit.z, (hit.id === B.ICE && hit.y <= SEA) ? B.WATER : B.AIR);
+  if (dim === 'overworld' && world.gen === 'oneblock' && hit.x === 0 && hit.y === 63 && hit.z === 0) {
+    const before = oneblockState(oneblockPhase);
+    if (!isCreative()) oneblockPhase++;
+    const st = oneblockState(oneblockPhase);
+    world.setBlock(0, 63, 0, oneblockPick(st.ph)); // respawns instantly
+    if (!isCreative()) {
+      if (st.i !== before.i) oneblockReward(st);
+      else if (!isFinite(st.ph.need) && oneblockPhase % 100 === 0) oneblockReward(st, true);
+      else if (isFinite(st.ph.need) && st.inPhase === st.ph.need - 10) {
+        toast(`${st.ph.icon} ${st.ph.name}: осталось 10 блоков до новой фазы!`, 2.5);
+      }
+    }
+    save();
+  }
   // doors break as a pair (only the broken half drops)
   if (BLOCKS[hit.id].doorPart) {
     const oy = BLOCKS[hit.id].doorTop ? hit.y - 1 : hit.y + 1;
@@ -1759,9 +2469,11 @@ function finishBreak(hit, info) {
     dims[dim].portals = dims[dim].portals.filter(p => world.getBlock(p.x, p.y, p.z) === B.PORTAL);
   }
   liquidContact(hit.x, hit.y, hit.z); // freed water/lava may now touch
+  if (hit.id === B.JUKEBOX) sfx.jukeboxStop();
   const c = avgColors[hit.id] || [0.5, 0.5, 0.5];
   particles.burst(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, c, 14, 3.2);
-  sfx.break();
+  sfx.breakMat(materialOf(hit.id));
+  damageHeld();
   stopMining();
 }
 
@@ -1795,6 +2507,7 @@ function updateMining(dt) {
       player.exhaustion += 0.1;
       const { dmg, crit } = attackDamage();
       mobHit.mob.hurt(dmg, dir.x, dir.z, { player, world, particles });
+      damageHeld();
       if (crit) critFx(mobHit.mob.pos.x, mobHit.mob.pos.y + mobHit.mob.height * 0.8, mobHit.mob.pos.z);
       else sfx.hit();
     }
@@ -1811,6 +2524,7 @@ function updateMining(dt) {
         player.exhaustion += 0.1;
         const { dmg, crit } = attackDamage();
         dragon.hurt(dmg, { particles });
+        damageHeld();
         if (crit) critFx(dragon.pos.x, dragon.pos.y + 1, dragon.pos.z);
         else sfx.hit();
       }
@@ -1855,7 +2569,7 @@ function updateMining(dt) {
       hit.z + 0.5 + hit.face[2] * 0.55,
       c, 2, 1.4
     );
-    sfx.mine();
+    sfx.dig(materialOf(hit.id));
   }
 
   if (mining.progress >= mining.total) {
@@ -1908,6 +2622,8 @@ function liquidTarget() {
   return null;
 }
 
+const notePitches = new Map(); // note block pitch memory (per position)
+
 function useHeld() {
   if (player.dead || invOpen) return;
   const hit = currentTarget();
@@ -1922,6 +2638,27 @@ function useHeld() {
     if (hit.id === B.CHEST) {
       placingHeld = false;
       openInventory('chest', dimPrefix() + chests.key(hit.x, hit.y, hit.z), { x: hit.x, y: hit.y, z: hit.z });
+      return;
+    }
+    if (hit.id === B.LEVER || hit.id === B.LEVER_ON) {
+      placingHeld = false;
+      world.setBlock(hit.x, hit.y, hit.z, hit.id === B.LEVER ? B.LEVER_ON : B.LEVER);
+      sfx.click();
+      return;
+    }
+    if (hit.id === B.BUTTON || hit.id === B.BUTTON_ON) {
+      placingHeld = false;
+      if (hit.id === B.BUTTON) {
+        world.setBlock(hit.x, hit.y, hit.z, B.BUTTON_ON);
+        if (!world._rsButtons) world._rsButtons = new Map();
+        world._rsButtons.set(hit.x + ',' + hit.y + ',' + hit.z, simTime + 1.2);
+        sfx.click();
+      }
+      return;
+    }
+    if (hit.id === B.SHULKER_BOX) {
+      placingHeld = false;
+      openInventory('shulker', dimPrefix() + chests.key(hit.x, hit.y, hit.z), { x: hit.x, y: hit.y, z: hit.z });
       return;
     }
     if (BLOCKS[hit.id].doorPart) {
@@ -1952,17 +2689,93 @@ function useHeld() {
       save();
       return;
     }
+    if (hit.id === B.DISPENSER) {
+      placingHeld = false;
+      openInventory('dispenser', dimPrefix() + chests.key(hit.x, hit.y, hit.z), { x: hit.x, y: hit.y, z: hit.z });
+      return;
+    }
+    if (hit.id === B.DROPPER) {
+      placingHeld = false;
+      openInventory('dropper', dimPrefix() + chests.key(hit.x, hit.y, hit.z), { x: hit.x, y: hit.y, z: hit.z });
+      return;
+    }
+    if (hit.id === B.HOPPER) {
+      placingHeld = false;
+      openInventory('hopper', dimPrefix() + chests.key(hit.x, hit.y, hit.z), { x: hit.x, y: hit.y, z: hit.z });
+      return;
+    }
+    if (isRep(hit.id)) { // right-click cycles repeater delay 1..4 (slider nub moves)
+      placingHeld = false;
+      const k = hit.x + ',' + hit.y + ',' + hit.z;
+      if (!world._rsData) world._rsData = new Map();
+      const st = world._rsData.get(k) || {};
+      st.d = (st.d || 1) % 4 + 1;
+      world._rsData.set(k, st);
+      world.setBlock(hit.x, hit.y, hit.z, hit.id); // same id: remesh only
+      sfx.click();
+      return;
+    }
+    if (isComp(hit.id)) { // right-click toggles comparator compare/subtract (front nub grows)
+      placingHeld = false;
+      const k = hit.x + ',' + hit.y + ',' + hit.z;
+      if (!world._rsData) world._rsData = new Map();
+      const st = world._rsData.get(k) || {};
+      st.m = st.m ? 0 : 1;
+      world._rsData.set(k, st);
+      world.setBlock(hit.x, hit.y, hit.z, hit.id); // same id: remesh only
+      if (world.rsUpdate) world.rsUpdate(hit.x, hit.y, hit.z);
+      sfx.click();
+      return;
+    }
+    if (hit.id === B.NOTE_BLOCK) {
+      placingHeld = false;
+      const k = dim + ':' + hit.x + ',' + hit.y + ',' + hit.z;
+      const p = ((notePitches.get(k) ?? 11) + 1) % 25;
+      notePitches.set(k, p);
+      sfx.note(p);
+      particles.burst(hit.x + 0.5, hit.y + 1.2, hit.z + 0.5, [0.3 + p / 25 * 0.7, 0.85, 1], 5, 1);
+      return;
+    }
+    if (hit.id === B.JUKEBOX) {
+      placingHeld = false;
+      if (sfx.jukeboxPlaying()) { sfx.jukeboxStop(); toast('The music fades…', 1.2); }
+      else { sfx.jukeboxStart(); toast('♪ Now playing: WebCraft Overture ♪', 3); }
+      return;
+    }
+    if (hit.id === B.ENCHANT_TABLE) {
+      placingHeld = false;
+      sfx.note(12);
+      setTimeout(() => sfx.note(19), 120);
+      toast('The runes shimmer… (enchanting is not ready yet)', 2.2);
+      return;
+    }
   }
   const id = heldId();
   const it = ITEMS[id];
   if (!it) return;
 
+  if (it.kind === 'structure') {
+    placingHeld = false; // single-shot: holding RMB must not spam castles
+    if (!hit) return;
+    const bx = hit.x + hit.face[0], by = hit.y + hit.face[1], bz = hit.z + hit.face[2];
+    if (by < 0 || by >= HEIGHT) return;
+    if (spawnGuard(bx, bz)) return; // no structures inside the spawn zone
+    swingT = 0;
+    const n = pasteStructure(it.struct, bx, by, bz);
+    if (n > 0) {
+      consumeHeld();
+      sfx.placeMat('wood');
+      toast(`Построено: ${it.name} (${n} блоков)`, 2.5);
+    }
+    return;
+  }
   if (it.kind === 'block') {
     if (!hit) return;
     const px = hit.x + hit.face[0], py = hit.y + hit.face[1], pz = hit.z + hit.face[2];
     if (py < 0 || py >= HEIGHT) return;
+    if (spawnGuard(px, pz)) return;
     const existing = world.getBlock(px, py, pz);
-    if (existing !== B.AIR && existing !== B.WATER) return;
+    if (existing !== B.AIR && existing !== B.WATER && existing !== B.LAVA) return;
     // only solid blocks can't overlap entities (liquids can be placed at your feet)
     if (BLOCKS[id].solid && (blockOverlapsEntity(px, py, pz, player) || mobs.anyOverlapping(px, py, pz))) return;
     if (!world.hasDataAt(px, pz)) return;
@@ -1981,7 +2794,7 @@ function useHeld() {
       world.setBlock(px, py, pz, BLOCKS[id].facings[f]);
       world.setBlock(px, py + 1, pz, B.DOOR_TOP);
       consumeHeld();
-      sfx.place();
+      sfx.placeMat('wood');
       return;
     }
     let placeId = id;
@@ -1996,16 +2809,44 @@ function useHeld() {
       placeId = BLOCKS[id].facings[Math.abs(d.x) > Math.abs(d.z) ? (d.x > 0 ? 0 : 2) : (d.z > 0 ? 1 : 3)];
     }
     swingT = 0;
+    // redstone facing: repeaters/comparators pick a yaw variant, the rest use the facing map
+    let faceData = null;
+    if (id === B.REPEATER || id === B.COMPARATOR) {
+      const d = player.forwardDir();
+      placeId = id + (Math.abs(d.x) > Math.abs(d.z) ? (d.x > 0 ? 0 : 1) : (d.z > 0 ? 2 : 3));
+    } else if (id === B.OBSERVER || id === B.PISTON || id === B.STICKY_PISTON || id === B.DISPENSER || id === B.DROPPER) {
+      const o = [-hit.face[0], -hit.face[1], -hit.face[2]]; // face the player
+      faceData = { f: DIRS6.findIndex((v) => v[0] === o[0] && v[1] === o[1] && v[2] === o[2]) };
+    } else if (id === B.HOPPER) {
+      const o = [-hit.face[0], -hit.face[1], -hit.face[2]]; // latch onto the clicked face
+      let hf = DIRS6.findIndex((v) => v[0] === o[0] && v[1] === o[1] && v[2] === o[2]);
+      if (hf === 2) hf = 3; // hoppers can't point up
+      faceData = { f: hf };
+    }
+    const heldTag = id === B.SHULKER_BOX ? (inventory.slots[selected] || {}).tag : null;
+    if (faceData && faceData.f >= 0) {
+      if (!world._rsData) world._rsData = new Map();
+      world._rsData.set(px + ',' + py + ',' + pz, faceData); // before setBlock so MP picks up `f`
+    }
     world.setBlock(px, py, pz, placeId);
+    if (id === B.SHULKER_BOX && heldTag && Array.isArray(heldTag.slots)) {
+      const [st] = shulkers.get(dimPrefix() + chests.key(px, py, pz), true);
+      st.slots = heldTag.slots.map(decSlot).concat(new Array(27).fill(null)).slice(0, 27);
+    }
+    if (id === B.OBSERVER) { // placed observers pulse once (Minecraft)
+      if (!world._rsPend) world._rsPend = new Map();
+      world._rsPend.set(px + ',' + py + ',' + pz, { at: world._rsNow || 0, kind: 'obsOn' });
+    }
     consumeHeld();
-    sfx.place();
+    sfx.placeMat(materialOf(placeId));
     // creative-placed liquids still react with each other
     if (id === B.WATER || id === B.LAVA) liquidContact(px, py, pz);
   } else if (it.kind === 'food') {
     if (player.hunger >= 20) { toast('Not hungry'); return; }
     swingT = 0;
+    eatT = 0;
     player.eat(it);
-    consumeHeld();
+    consumeHeld(it.returns || null); // e.g. mushroom stew gives the bowl back
     sfx.eat();
   } else if (it.kind === 'bucket') {
     swingT = 0;
@@ -2013,6 +2854,7 @@ function useHeld() {
       // empty bucket: scoop the liquid we're looking at
       const lt = liquidTarget();
       if (!lt) return;
+      if (spawnGuard(lt.x, lt.z)) return;
       world.setBlock(lt.x, lt.y, lt.z, B.AIR);
       consumeHeld(lt.id === B.LAVA ? I.LAVA_BUCKET : I.WATER_BUCKET);
       sfx.splash();
@@ -2021,6 +2863,7 @@ function useHeld() {
       if (!hit) return;
       const px = hit.x + hit.face[0], py = hit.y + hit.face[1], pz = hit.z + hit.face[2];
       if (py < 0 || py >= HEIGHT || !world.hasDataAt(px, pz)) return;
+      if (spawnGuard(px, pz)) return;
       const existing = world.getBlock(px, py, pz);
       if (existing !== B.AIR && existing !== B.WATER && existing !== B.LAVA) return;
       world.setBlock(px, py, pz, it.liquid === 'lava' ? B.LAVA : B.WATER);
@@ -2055,6 +2898,7 @@ function useHeld() {
     }
     swingT = 0;
     shootArrow();
+    damageHeld();
   } else if (it.kind === 'eye') {
     // eyes of ender socket into End portal frames
     if (hit && hit.id === B.END_FRAME && hit.t < 5) {
@@ -2090,6 +2934,222 @@ function compassDir(dx, dz) {
 
 const tntFuses = []; // {x, y, z, t, spark}
 
+// redstone side-effects: TNT ignition, note plays, door/plate clicks
+// --- redstone machines: dispensers, droppers, hoppers, target ----------------
+
+const MECH_EDGE = new Map(); // "dim:x,y,z" -> last powered state (edge trigger)
+
+function mechContAt(x, y, z) {
+  // container state at a cell, or null (checks every container kind)
+  const k = dimPrefix() + chests.key(x, y, z);
+  const id = world.getBlock(x, y, z);
+  if (id === B.FURNACE) { const st = furnaces.get(k); return st ? { state: st, pull: [2, 0, 1], push: [0, 1] } : null; }
+  if (id === B.CHEST) { const r = chests.get(k); return r && r[0] ? { state: r[0] } : null; }
+  if (id === B.SHULKER_BOX) { const r = shulkers.get(k); return r && r[0] ? { state: r[0] } : null; }
+  if (id === B.DISPENSER) { const r = dispensers.get(k); return r && r[0] ? { state: r[0] } : null; }
+  if (id === B.DROPPER) { const r = droppers.get(k); return r && r[0] ? { state: r[0] } : null; }
+  if (id === B.HOPPER) { const r = hoppers.get(k); return r && r[0] ? { state: r[0] } : null; }
+  return null;
+}
+
+function mechSameTag(a, b) {
+  return (!a && !b) || (!!a && !!b && JSON.stringify(a) === JSON.stringify(b));
+}
+
+function mechPushInto(cont, item) {
+  // insert a stack into the first fitting slot; returns leftover count
+  const slots = cont.state.slots;
+  const order = cont.push || slots.map((_, i) => i);
+  const lim = maxStack(item.id);
+  for (const i of order) {
+    const s = slots[i];
+    if (s && s.id === item.id && (s.d || 0) === (item.d || 0) && mechSameTag(s.tag, item.tag) && s.n < lim) {
+      const t = Math.min(item.n, lim - s.n);
+      s.n += t; item.n -= t;
+      if (!item.n) return 0;
+    }
+  }
+  for (const i of order) {
+    if (!slots[i]) { slots[i] = { id: item.id, n: item.n, d: item.d || 0, tag: item.tag || null }; return 0; }
+  }
+  return item.n;
+}
+
+function mechTakeOne(cont) {
+  const slots = cont.state.slots;
+  const order = cont.pull || slots.map((_, i) => i);
+  for (const i of order) {
+    const s = slots[i];
+    if (s && s.n > 0) {
+      const out = { id: s.id, n: 1, d: s.d || 0, tag: s.tag || null };
+      if (--s.n <= 0) slots[i] = null;
+      return out;
+    }
+  }
+  return null;
+}
+
+function mechFace(x, y, z, def = 3) {
+  const st = world._rsData ? world._rsData.get(x + ',' + y + ',' + z) : null;
+  return DIRS6[(st && st.f != null) ? st.f : def];
+}
+
+function mechTick() {
+  if (!world._rsMech) return;
+  for (const k of [...world._rsMech]) {
+    const [x, y, z] = k.split(',').map(Number);
+    const id = world.getBlock(x, y, z);
+    if (id !== B.DISPENSER && id !== B.DROPPER && id !== B.HOPPER) { world._rsMech.delete(k); continue; }
+    const pw = powerLevelAt(world, x, y, z) > 0;
+    if (id === B.HOPPER) { if (!pw) hopperTransfer(x, y, z); continue; }
+    const ek = dim + ':' + k;
+    const was = MECH_EDGE.get(ek) || false;
+    MECH_EDGE.set(ek, pw);
+    if (pw && !was) {
+      if (id === B.DISPENSER) fireDispenser(x, y, z);
+      else fireDropper(x, y, z);
+    }
+  }
+}
+
+function hopperTransfer(x, y, z) {
+  const [hst] = hoppers.get(dimPrefix() + chests.key(x, y, z), true);
+  const hop = { state: hst };
+  const [dx, dy, dz] = mechFace(x, y, z, 3);
+  // push down-stream first, then pull from above (Minecraft order)
+  const dst = mechContAt(x + dx, y + dy, z + dz);
+  if (dst) {
+    const item = mechTakeOne(hop);
+    if (item) {
+      if (world.getBlock(x + dx, y + dy, z + dz) === B.SHULKER_BOX && item.id === B.SHULKER_BOX) {
+        mechPushInto(hop, item); // no nesting: put it back
+      } else {
+        const left = mechPushInto(dst, item);
+        if (left > 0) { item.n = left; mechPushInto(hop, item); }
+        else contDirty = true;
+      }
+    }
+  }
+  const src = mechContAt(x, y + 1, z);
+  if (src) {
+    const item = mechTakeOne(src);
+    if (item) {
+      const left = mechPushInto(hop, item);
+      if (left > 0) { item.n = left; mechPushInto(src, item); }
+      else contDirty = true;
+    }
+  }
+}
+
+function fireDispenser(x, y, z) {
+  const [dx, dy, dz] = mechFace(x, y, z);
+  const fx = x + dx, fy = y + dy, fz = z + dz;
+  const [st] = dispensers.get(dimPrefix() + chests.key(x, y, z), true);
+  const cont = { state: st };
+  const item = mechTakeOne(cont);
+  if (!item) { sfx.click(); return; }
+  const front = world.getBlock(fx, fy, fz);
+  const putBack = () => mechPushInto(cont, item);
+  if (item.id === I.ARROW) {
+    shootDispenserArrow(fx + 0.5, fy + 0.5, fz + 0.5, dx, dy, dz);
+  } else if (item.id === B.TNT) {
+    if (front === B.AIR || front === B.WATER) { world.setBlock(fx, fy, fz, B.TNT); igniteTnt(fx, fy, fz); }
+    else putBack();
+  } else if (item.id === I.WATER_BUCKET || item.id === I.LAVA_BUCKET) {
+    if (front === B.AIR) {
+      world.setBlock(fx, fy, fz, item.id === I.WATER_BUCKET ? B.WATER : B.LAVA);
+      mechPushInto(cont, { id: I.BUCKET, n: 1 });
+    } else putBack();
+  } else if (item.id === I.BUCKET) {
+    if (front === B.WATER || front === B.LAVA) {
+      world.setBlock(fx, fy, fz, B.AIR);
+      mechPushInto(cont, { id: front === B.WATER ? I.WATER_BUCKET : I.LAVA_BUCKET, n: 1 });
+    } else putBack();
+  } else if (item.id === I.FLINT_STEEL) {
+    if (front === B.TNT) igniteTnt(fx, fy, fz);
+    putBack(); // tools aren't consumed
+  } else {
+    const es = drops.spawn(item.id, 1, fx + 0.5, fy + 0.5, fz + 0.5, { stack: true, dmg: item.d || 0, tag: item.tag || null });
+    if (es && es[0]) es[0].vel = { x: dx * 4, y: dy * 4 + 2, z: dz * 4 };
+  }
+  sfx.dispense();
+  contDirty = true;
+}
+
+function fireDropper(x, y, z) {
+  const [dx, dy, dz] = mechFace(x, y, z);
+  const [st] = droppers.get(dimPrefix() + chests.key(x, y, z), true);
+  const cont = { state: st };
+  const item = mechTakeOne(cont);
+  if (!item) { sfx.click(); return; }
+  const dst = mechContAt(x + dx, y + dy, z + dz);
+  if (dst && !(world.getBlock(x + dx, y + dy, z + dz) === B.SHULKER_BOX && item.id === B.SHULKER_BOX)) {
+    const left = mechPushInto(dst, item);
+    if (left > 0) { item.n = left; mechPushInto(cont, item); }
+  } else if (!dst) {
+    const es = drops.spawn(item.id, 1, x + dx + 0.5, y + dy + 0.5, z + dz + 0.5, { stack: true, dmg: item.d || 0, tag: item.tag || null });
+    if (es && es[0]) es[0].vel = { x: dx * 1.5, y: 1, z: dz * 1.5 };
+  } else {
+    mechPushInto(cont, item);
+  }
+  sfx.dispense();
+  contDirty = true;
+}
+
+function shootDispenserArrow(x, y, z, dx, dy, dz) {
+  const mesh = new THREE.Mesh(arrowGeo, arrowMat);
+  mesh.position.set(x, y, z);
+  scene.add(mesh);
+  arrows.push({
+    pos: { x, y, z },
+    vel: { x: dx * 22 + (Math.random() - 0.5) * 2, y: dy * 22 + 1, z: dz * 22 + (Math.random() - 0.5) * 2 },
+    ttl: 5, mesh, foe: true,
+  });
+  sfx.bow();
+}
+
+function arrowHitTarget(bx, by, bz, a) {
+  // bullseye = 15, middle ring = 10, edge = 5 (distance from face center)
+  const ax = Math.abs(a.vel.x) >= Math.abs(a.vel.y) && Math.abs(a.vel.x) >= Math.abs(a.vel.z) ? 'x'
+    : Math.abs(a.vel.y) >= Math.abs(a.vel.z) ? 'y' : 'z';
+  let o1, o2;
+  if (ax === 'x') { o1 = a.pos.y - by - 0.5; o2 = a.pos.z - bz - 0.5; }
+  else if (ax === 'y') { o1 = a.pos.x - bx - 0.5; o2 = a.pos.z - bz - 0.5; }
+  else { o1 = a.pos.x - bx - 0.5; o2 = a.pos.y - by - 0.5; }
+  const d = Math.max(Math.abs(o1), Math.abs(o2)) * 16; // 0..8
+  const lvl = d < 2 ? 15 : d < 4 ? 10 : 5;
+  if (!world._rsTarget) world._rsTarget = new Map();
+  world._rsTarget.set(bx + ',' + by + ',' + bz, { lvl, until: simTime + 1.2 });
+  if (world.rsUpdate) world.rsUpdate(bx, by, bz);
+  sfx.click();
+}
+
+function dispatchRedstone(a) {
+  if (!a) return;
+  if (a.dim !== undefined && a.dim !== dim) return;
+  if (a.t === 'ignite' || a.t === 'tnt') {
+    igniteTnt(a.x, a.y, a.z);
+  } else if (a.t === 'note') {
+    const p = notePitches.get(a.dim + ':' + a.x + ',' + a.y + ',' + a.z) ?? 11;
+    sfx.note(p);
+    particles.burst(a.x + 0.5, a.y + 1.2, a.z + 0.5, [0.3 + p / 25 * 0.7, 0.85, 1], 5, 1);
+  } else if (a.t === 'door') {
+    // powered doors swing: toggle bottom + top like a manual click
+    const bot = world.getBlock(a.x, a.y, a.z);
+    const bblk = BLOCKS[bot];
+    if (bblk && bblk.shape === 'door' && !bblk.doorTop && bblk.toggleId) {
+      world.setBlock(a.x, a.y, a.z, bblk.toggleId);
+      const top = world.getBlock(a.x, a.y + 1, a.z);
+      if (BLOCKS[top] && BLOCKS[top].doorTop && BLOCKS[top].toggleId) world.setBlock(a.x, a.y + 1, a.z, BLOCKS[top].toggleId);
+      sfx.door();
+    }
+  } else if (a.t === 'piston') {
+    sfx.piston();
+  } else if (a.t === 'click') {
+    sfx.click();
+  }
+}
+
 function igniteTnt(x, y, z, fuse = 2) {
   if (tntFuses.some((f) => f.x === x && f.y === y && f.z === z)) return;
   tntFuses.push({ x, y, z, t: fuse, spark: 0 });
@@ -2104,6 +3164,11 @@ function explode(cx, cy, cz, radius = 3.4) {
         // ragged sphere edge
         if (dx * dx + dy * dy + dz * dz > radius * radius * (0.7 + Math.random() * 0.45)) continue;
         const x = cx + dx, y = cy + dy, z = cz + dz;
+        if (inSpawnZone(x, z)) continue; // spawn plaza is explosion-proof
+        // one-block starter island survives explosions (creepers, TNT)
+        if (dim === 'overworld' && world.gen === 'oneblock') {
+          if ((y === 62 && x >= 0 && x <= 4 && z >= 0 && z <= 4) || (x === 0 && y === 63 && z === 0)) continue;
+        }
         const id = world.getBlock(x, y, z);
         if (id === B.AIR || id === B.WATER || id === B.BEDROCK || id === B.OBSIDIAN ||
           id === B.END_FRAME || id === B.END_FRAME_FILLED || id === B.END_PORTAL || id === B.PORTAL) continue;
@@ -2188,8 +3253,16 @@ function updateEyeFlights(dt) {
 function pickBlock() {
   const hit = currentTarget();
   if (!hit) return;
-  const idx = inventory.slots.findIndex((s, i) => i < 9 && s && s.id === hit.id);
-  if (idx >= 0) setSelected(idx);
+  const id = (BLOCKS[hit.id] && BLOCKS[hit.id].item) || hit.id;
+  if (!ITEMS[id]) return;
+  const idx = inventory.slots.findIndex((s, i) => i < 9 && s && s.id === id);
+  if (idx >= 0) { setSelected(idx); return; }
+  if (isCreative()) {
+    // creative: the targeted block appears in the selected slot, like Minecraft
+    inventory.slots[selected] = { id, n: maxStack(id) };
+    sfx.pop();
+    inventory._c();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2234,6 +3307,7 @@ function updateDayNight(dt) {
   const a = timeOfDay * Math.PI * 2; // 0 = dawn, PI/2 = noon
   const sinA = Math.sin(a);
   daylight = Math.max(0, Math.min(1, (sinA + 0.12) / 0.42));
+  if (weatherMode === 'rain') daylight *= 0.45;
   const dl = daylight * daylight * (3 - 2 * daylight); // smoothstep
 
   ambient.intensity = 0.35 + 0.5 * dl;
@@ -2284,13 +3358,22 @@ function save() {
       inventory: inventory.serialize(),
       furnaces: furnaces.serialize(),
       chests: chests.serialize(),
+      shulkers: shulkers.serialize(),
+      dispensers: dispensers.serialize(),
+      droppers: droppers.serialize(),
+      hoppers: hoppers.serialize(),
+      rsData: worldOver.rsDataSave(),
+      rsDataN: worldNether.rsDataSave(),
+      rsDataE: worldEnd.rsDataSave(),
       drops: {
         overworld: dropsByDim.overworld.serialize(),
         nether: dropsByDim.nether.serialize(),
         end: dropsByDim.end.serialize(),
       },
       edits,
+      oneblock: oneblockPhase,
     }));
+    if (!mpSession && currentWorldId) touchWorld(currentWorldId);
   } catch (e) { /* storage full or unavailable */ }
 }
 setInterval(save, 10000);
@@ -2304,7 +3387,13 @@ let fps = 60, fpsSmooth = 60;
 let debugT = 0;
 let simTime = 0;
 let bobPhase = 0, bobAmp = 0;
+let stepAcc = 0;
+let prevInWater = false;
+let mechT = 0;
+let liqT = 0, liqTickN = 0; // liquid flow accumulator (lava moves every 3rd tick)
+let contDirty = false; // open machine UI needs a live refresh
 
+const pasteQueue = []; // [world, x, y, z, id]: queued structure blocks, drained 900/frame
 function animate() {
   requestAnimationFrame(animate);
   frame(Math.min(clock.getDelta(), 0.05));
@@ -2321,18 +3410,36 @@ function frame(dt) {
 
   // singleplayer: the world pauses while the inventory is open —
   // except the furnace UI, which runs in real time like Minecraft containers
-  const paused = invOpen && invMode !== 'furnace' && invMode !== 'chest'; // containers run in real time
+  const paused = invOpen && invMode !== 'furnace' && invMode !== 'chest' && invMode !== 'shulker' && invMode !== 'dispenser' && invMode !== 'dropper' && invMode !== 'hopper'; // containers run in real time
   if ((started || forceStarted) && !paused) {
+    const preVy = player.vel.y, preGround = player.onGround;
     player.update(dt, isLocked() ? keys : new Set(), time);
+    if (!preGround && player.onGround && preVy < -9 && !player.dead) {
+      sfx.land(Math.min(1, (-preVy - 9) / 22 + 0.25));
+    }
     mobs.update(dt, { world, player, daylight, time, sfx, particles, drops, explode });
-    drops.update(dt, { player, inventory, onPickup: () => sfx.pickup() });
+    drops.update(dt, { player, inventory, onPickup: () => sfx.pickup(), sendGone: (nid) => net.sendGone(nid) });
     if (furnaces.tick(dt) && invOpen && invMode === 'furnace') renderInvScreen();
+    world._rsNow = simTime;
+    tickRedstone(world, {
+      entities: [player, ...mobs.mobs],
+      daylight: Math.max(0, Math.min(15, Math.round(daylight * 15))),
+      time: simTime,
+      setBlock: (x, y, z, id) => world.setBlock(x, y, z, id),
+    });
+    mechT += dt;
+    if (mechT >= 0.2) { mechT = 0; mechTick(); }
+    liqT += dt;
+    if (liqT >= 0.25) { liqT = 0; liquidTick(); }
+    if (contDirty) { contDirty = false; if (invOpen && (invMode === 'dispenser' || invMode === 'dropper' || invMode === 'hopper')) renderInvScreen(); }
     if (dim === 'end' && dragon && !dragon.dead) dragon.update(dt, { player, time, sfx, particles });
     updatePearls(dt);
     updateArrows(dt);
     updateEyeFlights(dt);
     updateTnt(dt);
     updateMining(dt);
+    oneblockTick(dt);
+    spawnTick(dt);
 
     // held-repeat placing / eating
     placeCd -= dt;
@@ -2351,11 +3458,75 @@ function frame(dt) {
   const bobTarget = (prefs.bob && player.onGround && !player.fly && hspd > 0.5) ? Math.min(1, hspd / 4.3) : 0;
   bobAmp += (bobTarget - bobAmp) * Math.min(1, 8 * dt);
   if (bobTarget > 0) bobPhase += dt * hspd * 0.45;
+  else if (player.swimming && hspd > 0.5) bobPhase += dt * hspd * 0.35; // crawl stroke
   const bobY = Math.abs(Math.sin(bobPhase * Math.PI)) * 0.04 * bobAmp;
   const bobRoll = Math.sin(bobPhase * Math.PI) * 0.007 * bobAmp;
 
-  camera.position.set(eye.x, eye.y + bobY, eye.z);
-  camera.rotation.set(player.pitch, player.yaw, bobRoll);
+  // footsteps: distance-triggered, louder when sprinting, quiet when sneaking
+  const stepping = !paused && started && !player.dead && player.onGround && !player.fly && hspd > 0.8;
+  if (stepping) {
+    stepAcc += hspd * dt;
+    const stride = player.sprinting ? 2.7 : player.sneaking ? 1.7 : 2.2;
+    if (stepAcc >= stride) {
+      stepAcc = 0;
+      const mat = player.inWater ? 'water'
+        : materialOf(world.getBlock(Math.floor(player.pos.x), Math.floor(player.pos.y - 0.25), Math.floor(player.pos.z)));
+      sfx.step(mat, player.sneaking ? 0.35 : player.sprinting ? 1.2 : 1);
+    }
+  } else {
+    stepAcc = 0;
+  }
+
+  // splash when hitting the water
+  if (!prevInWater && player.inWater && player.vel.y < -4 && started && !player.dead) {
+    particles.burst(eye.x, eye.y - 0.6, eye.z, [0.3, 0.5, 0.9], 24, 3);
+    sfx.splash();
+  }
+  prevInWater = player.inWater;
+
+  // third-person body
+  const showBody = camMode !== 0 && !player.dead && started;
+  playerModel.group.visible = showBody;
+  if (showBody) {
+    const a = player.renderAlpha;
+    playerModel.group.position.set(
+      player.prevPos.x + (player.pos.x - player.prevPos.x) * a,
+      player.prevPos.y + (player.pos.y - player.prevPos.y) * a,
+      player.prevPos.z + (player.pos.z - player.prevPos.z) * a
+    );
+    playerModel.group.rotation.y = player.yaw;
+    playerModel.head.rotation.x = THREE.MathUtils.clamp(-player.pitch, -1.1, 1.1) * 0.85;
+    posePlayer(playerModel, bobPhase * Math.PI, bobAmp, swingT, player.sneaking, {
+      run: player.sprinting && !player.swimming ? 1 : 0, eat: eatT,
+      swim: player.swimming ? 1 : 0, fly: player.fly,
+      air: !player.onGround && !player.inWater && !player.fly,
+      t: performance.now() / 1000,
+    });
+    const sig = inventory.armor.map(s => (s ? ITEMS[s.id].matKey : '-')).join(',');
+    if (sig !== armorSig) {
+      armorSig = sig;
+      playerModel.setArmor(inventory.armor.map(s => (s ? ITEMS[s.id].matKey : null)));
+    }
+  }
+  heldGroup.visible = !showBody;
+
+  if (camMode === 0) {
+    camera.position.set(eye.x, eye.y + bobY, eye.z);
+    camera.rotation.set(player.pitch, player.yaw, bobRoll);
+  } else {
+    // pull the camera back/front along the view axis, stopping at walls
+    const fwd = player.forwardDir();
+    const sgn = camMode === 1 ? -1 : 1;
+    const dx = fwd.x * sgn, dy = fwd.y * sgn, dz = fwd.z * sgn;
+    let dist = 4;
+    for (let d = 0.8; d <= 4; d += 0.25) {
+      const bb = world.getBlock(Math.floor(eye.x + dx * d), Math.floor(eye.y + dy * d), Math.floor(eye.z + dz * d));
+      if (bb !== B.AIR && bb !== B.WATER && BLOCKS[bb] && BLOCKS[bb].solid) { dist = Math.max(0.6, d - 0.3); break; }
+    }
+    camera.position.set(eye.x + dx * dist, Math.max(0.5, eye.y + dy * dist), eye.z + dz * dist);
+    if (camMode === 1) camera.rotation.set(player.pitch, player.yaw, 0);
+    else camera.rotation.set(-player.pitch, player.yaw + Math.PI, 0);
+  }
 
   // sprint FOV (70 base, +10% sprinting)
   const targetFov = player.sprinting ? 77 : 70;
@@ -2364,12 +3535,21 @@ function frame(dt) {
     camera.updateProjectionMatrix();
   }
 
-  // held item swing animation
+  // held item swing animation (+ eating + swimming offsets for the arm)
   swingT += dt * 7;
-  if (heldMesh) {
+  if (eatT >= 0) { eatT += dt / 1.1; if (eatT >= 1) eatT = -1; }
+  {
     const s = Math.min(swingT, Math.PI);
-    heldGroup.rotation.x = (ITEMS[heldId()]?.kind === 'block' ? 0.12 : 0.1) - Math.sin(s) * 0.6;
-    heldGroup.position.y = -0.46 - Math.sin(s) * 0.12;
+    const baseRx = (ITEMS[heldId()]?.kind === 'block' ? 0.12 : 0.1);
+    let rx = baseRx - Math.sin(s) * 0.6;
+    let py = -0.46 - Math.sin(s) * 0.12;
+    if (player.swimming) py -= 0.12;
+    if (eatT >= 0) { // food to the mouth, chomping
+      rx = -0.9 + Math.sin(eatT * 28) * 0.18;
+      py = -0.2 + Math.abs(Math.sin(eatT * 14)) * 0.05;
+    }
+    heldGroup.rotation.x = rx;
+    heldGroup.position.y = py;
   }
 
   // block highlight
@@ -2381,12 +3561,16 @@ function frame(dt) {
     highlight.visible = false;
   }
 
+  if (pasteQueue.length) { // drain the structure queue a slice per frame
+    for (const [w, x, y, z, id] of pasteQueue.splice(0, 900)) w.setBlock(x, y, z, id);
+  }
   updateDayNight((started || forceStarted) && !paused ? dt : 0);
   particles.update(dt);
   updateHearts();
 
   // live furnace progress bars while its UI is open
   if (invOpen && invMode === 'furnace') updateFurnaceBars();
+  if (invOpen && (invMode === 'inv' || invMode === 'table')) renderPlayerPreview();
 
   // burning vignette (creative players don't burn)
   fireOverlayEl.style.opacity = (player.inLava || player.burnT > 0) && !player.dead && !isCreative() ? 0.75 : 0;
@@ -2444,8 +3628,14 @@ function frame(dt) {
     debugEl.textContent =
       `FPS ${fpsSmooth.toFixed(0)}  |  XYZ ${player.pos.x.toFixed(1)} / ${player.pos.y.toFixed(1)} / ${player.pos.z.toFixed(1)}\n` +
       `chunks ${world.chunks.size}  mobs ${mobs.mobs.length}  drops ${drops.list.length}  time ${timeOfDay.toFixed(2)}  daylight ${daylight.toFixed(2)}\n` +
-      `seed ${world.seed >>> 0}  renderDist ${renderDist}  mode ${player.gameMode}  fly ${player.fly}`;
+      `seed ${world.seed >>> 0}  renderDist ${renderDist}  mode ${player.gameMode}  fly ${player.fly}  cam ${camMode}`;
   }
+
+  // multiplayer remotes + weather
+  updateRemotes(dt);
+  if (weatherUntil && simTime > weatherUntil && weatherMode === 'rain') setWeather('clear');
+  updateClouds(dt);
+  updateRain(dt);
 
   renderer.render(scene, camera);
 }
@@ -2461,6 +3651,329 @@ renderHotbar();
 updateHeldItem();
 updateHearts();
 animate();
+
+// ---------------------------------------------------------------------------
+// Multiplayer: shared block edits, remote players, chat, time/weather sync
+
+function isMP() { return !!mpSession; }
+
+const SPAWN_R = 16; // spawn safe-zone radius (multiplayer overworld only)
+function inSpawnRadius(sx, sz, x, z, r = SPAWN_R) {
+  const dx = x - sx, dz = z - sz;
+  return dx * dx + dz * dz <= r * r;
+}
+function inSpawnZone(x, z) {
+  return isMP() && dim === 'overworld' &&
+    inSpawnRadius(Math.floor(spawnPoint.x), Math.floor(spawnPoint.z), Math.floor(x), Math.floor(z));
+}
+function spawnProtected() { return !isCreative() && !net.isOp(net.myId); }
+let spawnToastCd = 0;
+function spawnGuard(x, z) { // true = edit blocked (non-op inside the spawn zone)
+  if (!inSpawnZone(x, z) || !spawnProtected()) return false;
+  if (spawnToastCd <= 0) { spawnToastCd = 1.5; toast('\u{1F3E0} Спавн защищён! Здесь строить нельзя', 1.5); }
+  return true;
+}
+let wasInSpawn = false;
+function spawnTick(dt) {
+  spawnToastCd = Math.max(0, spawnToastCd - dt);
+  const inside = inSpawnZone(player.pos.x, player.pos.z);
+  player.invulnerable = inside; // god mode inside the safe zone
+  if (inside && !wasInSpawn) toast('\u{1F3E0} Спавн — безопасная зона. Здесь ты бессмертен!', 2.5);
+  wasInSpawn = inside;
+}
+const remoteModels = new Map(); // id -> {group, parts, walkPhase, swingT, armorSig}
+let netPosT = 0, netJump = false, prevSwingT = 0;
+const pendingSets = []; // [dim,x,y,z,id,f?] flushed to the server each frame
+
+function mpArmor() { return inventory.armor.map(s => (s ? ITEMS[s.id].matKey || null : null)); }
+function afterTeleport() { netJump = true; }
+function afterEdit() { save(); }
+
+function setWeather(mode, secs = 0, fromNet = false) {
+  weatherMode = mode === 'rain' ? 'rain' : 'clear';
+  weatherUntil = secs > 0 ? simTime + secs : 0;
+  setRain(weatherMode === 'rain');
+  if (!fromNet && mpSession && net.online) net.sendWeather(weatherMode);
+}
+
+function setRenderDist(n) {
+  renderDist = Math.min(8, Math.max(2, n | 0));
+  worldOver.renderDist = renderDist;
+  worldNether.renderDist = renderDist;
+  worldEnd.renderDist = renderDist;
+  prefs.rd = renderDist;
+  savePrefs();
+}
+
+let tabListEl = null;
+function showTabList(show) {
+  if (!tabListEl) tabListEl = document.getElementById('tabList');
+  if (!tabListEl) return;
+  if (!show || !mpSession || !net.online) { tabListEl.classList.remove('show'); return; }
+  const esc = (s) => String(s).replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+  const rows = [`${esc(net.name)} (you)${net.isOp() ? ' \u2605' : ''}`,
+    ...[...net.players.values()].map(q => `${esc(q.name)}${net.isOp(q.id) ? ' \u2605' : ''} \u00b7 ${esc(q.dim || 'overworld')}`)];
+  tabListEl.innerHTML = `<div class="tab-head">${rows.length} online</div>` + rows.map(r => `<div>${r}</div>`).join('');
+  tabListEl.classList.add('show');
+}
+
+function relockPointer() {
+  if (started && !player.dead && !invOpen && !document.pointerLockElement) {
+    try { canvas.requestPointerLock(); } catch (e) {}
+  }
+}
+
+function removeRemote(id) {
+  const r = remoteModels.get(id);
+  if (r) { scene.remove(r.group); remoteModels.delete(id); }
+}
+
+function makeNameSprite(name) {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 48;
+  const g = c.getContext('2d');
+  g.font = 'bold 26px monospace';
+  g.textAlign = 'center';
+  g.fillStyle = 'rgba(0,0,0,0.55)';
+  const w = Math.min(250, g.measureText(name).width + 24);
+  g.fillRect(128 - w / 2, 4, w, 38);
+  g.fillStyle = '#ffffff';
+  g.fillText(name, 128, 32);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false, transparent: true }));
+  sp.scale.set(1.9, 0.36, 1);
+  return sp;
+}
+
+// after joining, push our locally saved edits so everyone sees them
+function pushLocalEdits() {
+  if (!net.online) return;
+  const all = [];
+  for (const w of [worldOver, worldNether, worldEnd]) {
+    for (const [ck, m] of w.edits) {
+      const [cx, cz] = ck.split(',').map(Number);
+      for (const [lk, id] of m) {
+        const [lx, y, lz] = lk.split(',').map(Number);
+        all.push({ dim: w.dim, x: cx * 16 + lx, y, z: cz * 16 + lz, id });
+      }
+    }
+  }
+  for (let i = 0; i < all.length; i += 500) net.sendSets(all.slice(i, i + 500));
+}
+
+// item mesh floating in a remote player's right hand
+function setRemoteHeld(r, id) {
+  if (r.held) {
+    r.parts.armR.remove(r.held);
+    if (!r.held.userData.sharedRes) { r.held.geometry.dispose(); r.held.material.dispose(); }
+    r.held = null;
+  }
+  const it = ITEMS[id];
+  if (!it) return;
+  let m;
+  if (it.kind === 'block') {
+    m = new THREE.Mesh(cachedBlockGeometry(id), materials.opaque);
+    m.scale.setScalar(0.28);
+    m.userData.sharedRes = true; // cached geo + shared material: dispose() must skip
+  } else {
+    m = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.42, 0.42),
+      new THREE.MeshBasicMaterial({ map: itemTexture(id), transparent: true, alphaTest: 0.1, side: THREE.DoubleSide })
+    );
+  }
+  m.position.set(0, -0.62, -0.1);
+  r.parts.armR.add(m);
+  r.held = m;
+}
+
+// structure paste queue: big builds (city!) go in slices so the game never freezes
+
+// instant structures (house/castle/well/portal/villa/city): queue at the base cell
+function pasteStructure(key, bx, by, bz) {
+  const build = STRUCT_BUILDERS[key];
+  if (!build) return 0;
+  const rows = build();
+  let minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9;
+  for (const [dx, , dz] of rows) {
+    if (dx < minX) minX = dx; if (dx > maxX) maxX = dx;
+    if (dz < minZ) minZ = dz; if (dz > maxZ) maxZ = dz;
+  }
+  const cx = bx + ((minX + maxX) >> 1), cz = bz + ((minZ + maxZ) >> 1);
+  if (!world.hasDataAt(bx + minX, bz + minZ) || !world.hasDataAt(bx + maxX, bz + maxZ) || !world.hasDataAt(cx, cz)) {
+    toast('Чанки не загружены — подойдите ближе', 2);
+    return 0;
+  }
+  let n = 0;
+  for (const [dx, dy, dz, id] of rows) {
+    const x = bx + dx, y = by + dy, z = bz + dz;
+    if (y < 0 || y >= HEIGHT) continue;
+    if (world.getBlock(x, y, z) === B.BEDROCK) continue;
+    pasteQueue.push([world, x, y, z, id]);
+    n++;
+  }
+  return n;
+}
+
+function updateRemotes(dt) {
+  if (!mpSession || !net.online) return;
+  if (pendingSets.length) net.sendSets(pendingSets.splice(0, pendingSets.length).map(([d, x, y, z, id, f]) => ({ dim: d, x, y, z, id, f })));
+  if (swingT < prevSwingT) net.sendAct('swing'); // our arm swung: tell everyone
+  prevSwingT = swingT;
+  netPosT -= dt;
+  if (netPosT <= 0) {
+    netPosT = 0.1;
+    net.sendPos(player.pos, player.yaw, player.pitch, mpArmor(), dim, netJump, player.sneaking, heldId() || 0, player.swimming ? 1 : 0);
+    netJump = false;
+  }
+  for (const [id, p] of net.players) {
+    let r = remoteModels.get(id);
+    if (!r) {
+      const parts = buildPlayerModel();
+      const tag = makeNameSprite(p.name);
+      tag.position.y = 2.15;
+      parts.group.add(tag);
+      scene.add(parts.group);
+      r = { group: parts.group, parts, walkPhase: Math.random() * 6, swingT: 99, armorSig: '' };
+      r.group.position.set(p.p[0], p.p[1], p.p[2]);
+      remoteModels.set(id, r);
+    }
+    const sameDim = (p.dim || 'overworld') === dim;
+    r.group.visible = sameDim && !player.dead;
+    if (!sameDim) continue;
+    const g = r.group.position;
+    const dx = p.p[0] - g.x, dy = p.p[1] - g.y, dz = p.p[2] - g.z;
+    const dist = Math.hypot(dx, dz);
+    if (Math.hypot(dx, dy, dz) > 30) g.set(p.p[0], p.p[1], p.p[2]); // teleport snap
+    else { const k = Math.min(1, dt * 10); g.x += dx * k; g.y += dy * k; g.z += dz * k; }
+    r.group.rotation.y = p.yaw || 0;
+    r.parts.head.rotation.x = THREE.MathUtils.clamp(-(p.pitch || 0), -1.1, 1.1) * 0.85;
+    const speed = dist / Math.max(dt, 1e-3);
+    r.walkPhase += dt * (2 + Math.min(8, speed) * 1.6);
+    r.swingT += dt;
+    posePlayer(r.parts, r.walkPhase, Math.min(1, speed / 4), r.swingT, !!p.sneak, {
+      run: speed > 5 ? 1 : 0, swim: p.swim ? 1 : 0, t: performance.now() / 1000,
+    });
+    const sig = (p.armor || []).join(',');
+    if (sig !== r.armorSig) { r.armorSig = sig; r.parts.setArmor(p.armor || [null, null, null, null]); }
+    const hsig = p.held | 0;
+    if (hsig !== r.heldSig) { r.heldSig = hsig; setRemoteHeld(r, hsig); }
+  }
+  for (const id of [...remoteModels.keys()]) {
+    if (!net.players.has(id)) removeRemote(id);
+  }
+}
+
+function updateClouds(dt) {
+  cloudGroup.visible = dim === 'overworld';
+  if (!cloudGroup.visible) return;
+  for (const m of cloudGroup.children) {
+    m.position.x += m.userData.v * dt;
+    if (m.position.x - camera.position.x > 170) m.position.x -= 340;
+    if (m.position.x - camera.position.x < -170) m.position.x += 340;
+  }
+}
+
+function updateRain(dt) {
+  rain.visible = weatherMode === 'rain' && dim === 'overworld';
+  if (!rain.visible) return;
+  rain.position.set(camera.position.x, camera.position.y - 12, camera.position.z);
+  const a = rainGeo.attributes.position.array;
+  for (let i = 0; i < RAIN_N; i++) {
+    a[i * 3 + 1] -= dt * 22;
+    if (a[i * 3 + 1] < 0) {
+      a[i * 3 + 1] = 30;
+      a[i * 3] = (Math.random() - 0.5) * 44;
+      a[i * 3 + 2] = (Math.random() - 0.5) * 44;
+    }
+  }
+  rainGeo.attributes.position.needsUpdate = true;
+}
+
+initChat({
+  player, inventory, mobs, scene,
+  isCreative, applyGameMode,
+  getWorld: () => world,
+  getDim: () => dim,
+  dims, worldOver,
+  getTime: () => timeOfDay,
+  setTime: (v) => { timeOfDay = v; if (mpSession && net.online) net.sendTime(v); },
+  setRenderDist, getRenderDist: () => renderDist,
+  setWeather: (m, s) => setWeather(m, s),
+  getWeather: () => weatherMode,
+  spawnPoint, seed, inSpawnZone,
+  net, cycleCamera, toast, sfx,
+  myName: () => (mpSession ? net.name : 'you'),
+  isMP: () => !!mpSession,
+  disconnectMP: () => { save(); try { sessionStorage.removeItem('webcraft_mp'); } catch (e) {} location.reload(); },
+  afterTeleport, afterEdit,
+  relock: relockPointer,
+});
+
+for (const w of [worldOver, worldNether, worldEnd]) { w.onRedstoneAction = dispatchRedstone; w._rsNow = 0; }
+
+if (mpSession) {
+  for (const w of [worldOver, worldNether, worldEnd]) {
+    w.onEdit = (x, y, z, id) => { if (net.online) pendingSets.push([w.dim, x, y, z, id, w._rsData ? (w._rsData.get(x + ',' + y + ',' + z) || {}).f : undefined]); };
+  }
+  net.connect(mpSession.addr, mpSession.name, {
+    getPos: () => [player.pos.x, player.pos.y, player.pos.z],
+    getYaw: () => player.yaw,
+    getDim: () => dim,
+    getArmor: mpArmor,
+    onWelcome: (m) => {
+      if ((m.seed | 0) !== (mpSession.seed | 0)) {
+        mpSession.seed = m.seed | 0;
+        try { sessionStorage.setItem('webcraft_mp', JSON.stringify(mpSession)); } catch (e) {}
+        try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
+        location.reload();
+        return;
+      }
+      toast(`Connected to ${m.server || 'server'} as ${m.name}`, 3);
+      chatSys(`Connected to ${m.server || 'server'} — ${m.players.length + 1} online`);
+      if (m.weather === 'rain') setWeather('rain', 0, true);
+      if (typeof m.time === 'number') timeOfDay = m.time;
+    },
+    onSynced: () => pushLocalEdits(),
+    onLeave: (id) => removeRemote(id),
+    onChat: (from, text) => chatMessage(`<${from}> ${text}`),
+    onTell: (from, text) => chatMessage(`[${from} \u2192 you] ${text}`, '#f0a0f0'),
+    onSys: (text) => chatMessage(text, '#ffff55'),
+    onSets: (list) => {
+      const worlds = [worldOver, worldNether, worldEnd];
+      for (const w of worlds) w._muteEdit = true;
+      try {
+        for (const s of list) {
+          const w = s.dim === 'nether' ? worldNether : s.dim === 'end' ? worldEnd : worldOver;
+          w.setBlock(s.x, s.y, s.z, s.id);
+          if (Number.isInteger(s.f) && s.f >= 0 && s.f <= 5) {
+            if (!w._rsData) w._rsData = new Map();
+            const k = s.x + ',' + s.y + ',' + s.z;
+            const st = w._rsData.get(k) || {};
+            st.f = s.f;
+            w._rsData.set(k, st);
+          }
+        }
+      } finally {
+        for (const w of worlds) w._muteEdit = false;
+      }
+    },
+    onTime: (t) => { if (Math.abs(t - timeOfDay) > 0.004) timeOfDay = t; },
+    onWeather: (mode) => setWeather(mode, 0, true),
+    onAct: (id, act) => { const r = remoteModels.get(id); if (r && act === 'swing') r.swingT = 0; },
+    onDrop: (m) => {
+      if (!m || !ITEMS[m.id]) return;
+      if (![m.x, m.y, m.z].every(Number.isFinite)) return;
+      const es = drops.spawn(m.id, Math.max(1, Math.min(64, m.n | 0)), m.x, m.y, m.z, { stack: true, ttl: 90, dmg: m.dmg | 0, nid: String(m.nid || ''), tag: m.tag || null });
+      if (es && es[0]) es[0].vel = { x: +m.vx || 0, y: (+m.vy || 0) + 1, z: +m.vz || 0 };
+    },
+    onGone: (nid) => drops.removeByNid(nid),
+    onKick: (reason) => toast('Kicked: ' + reason, 4),
+    onClose: () => {
+      toast('Disconnected from server', 3);
+      chatSys('Disconnected from server');
+      for (const id of [...remoteModels.keys()]) removeRemote(id);
+    },
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Debug hooks (used by automated tests; harmless in production)
@@ -2498,6 +4011,8 @@ window.__game = {
   },
   suppressSave: () => { wipeSave = true; },
   setGameMode: (m) => applyGameMode(m, { silent: true }),
+  cycleCamera, getCamMode: () => camMode,
+  chat: submitChat, net, setWeather, isMP,
   getGameMode: () => player.gameMode,
   getDim: () => dim,
   switchDimension, setDimension, tryLightPortal, dims,

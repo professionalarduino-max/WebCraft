@@ -16,6 +16,10 @@ const DROP_TABLE = {
   blaze: [[I.BLAZE_ROD, 0, 1]],
   enderman: [[I.ENDER_PEARL, 1, 2]],
   creeper: [[I.GUNPOWDER, 0, 2]],
+  chicken: [[I.RAW_CHICKEN, 1, 2]],
+  skeleton: [[I.ARROW, 0, 2], [I.BONE, 0, 2]],
+  slime: [],
+  slime_small: [[I.SLIMEBALL, 0, 2]],
 };
 
 const GRAVITY = 26;
@@ -29,6 +33,10 @@ const TYPES = {
   blaze: { hp: 20, speed: 1.6, half: 0.35, height: 1.6, color: 0xe8a428 },
   enderman: { hp: 40, speed: 3.4, half: 0.35, height: 2.9, color: 0xbb44dd, dmg: 5 },
   creeper: { hp: 20, speed: 1.85, half: 0.3, height: 1.7, color: 0x4aa84a },
+  chicken: { hp: 4, speed: 2.2, half: 0.25, height: 0.7, color: 0xf2f2f2 },
+  skeleton: { hp: 20, speed: 2.4, half: 0.3, height: 1.9, color: 0xcfcfcf, dmg: 3 },
+  slime: { hp: 16, speed: 2.6, half: 0.55, height: 1.1, color: 0x62c462, dmg: 3 },
+  slime_small: { hp: 6, speed: 2.2, half: 0.3, height: 0.6, color: 0x62c462, dmg: 0 },
 };
 
 function box(w, h, d, color, x, y, z) {
@@ -54,6 +62,16 @@ function eyes(head, hw, hz, color = 0x1a1a1a) {
   head.add(box(0.07, 0.07, 0.02, color, hw * 0.45, 0.05, hz));
 }
 
+function slimeModel(g, s) {
+  const green = 0x62c462, dark = 0x2f8a3f;
+  g.add(box(0.9 * s, 0.75 * s, 0.9 * s, green, 0, 0.42 * s, 0)); // jelly body
+  const head = box(0.5 * s, 0.4 * s, 0.1 * s, green, 0, 0.55 * s, -0.42 * s); // face plate
+  head.add(box(0.1 * s, 0.14 * s, 0.02, dark, -0.12 * s, 0.02, -0.06 * s));
+  head.add(box(0.1 * s, 0.14 * s, 0.02, dark, 0.12 * s, 0.02, -0.06 * s));
+  g.add(head);
+  return { legs: [], head };
+}
+
 // Models face -z (matches yaw math). Group origin at the feet.
 const MODELS = {
   pig(g) {
@@ -63,6 +81,7 @@ const MODELS = {
     eyes(head, 0.22, -0.21);
     head.add(box(0.18, 0.14, 0.06, 0xd9827e, 0, -0.08, -0.22));
     g.add(head);
+    g.add(box(0.07, 0.07, 0.18, 0xd9827e, 0, 0.58, 0.6)); // curly tail nub
     const legs = [
       leg(0.16, 0.3, c, -0.2, 0.3, -0.3), leg(0.16, 0.3, c, 0.2, 0.3, -0.3),
       leg(0.16, 0.3, c, -0.2, 0.3, 0.35), leg(0.16, 0.3, c, 0.2, 0.3, 0.35),
@@ -75,6 +94,7 @@ const MODELS = {
     g.add(box(0.75, 0.55, 1.1, wool, 0, 0.72, 0.05));
     const head = box(0.32, 0.32, 0.35, skin, 0, 0.95, -0.68);
     eyes(head, 0.16, -0.18);
+    head.add(box(0.36, 0.12, 0.38, wool, 0, 0.2, 0)); // wool cap
     g.add(head);
     const legs = [
       leg(0.14, 0.45, skin, -0.2, 0.45, -0.32), leg(0.14, 0.45, skin, 0.2, 0.45, -0.32),
@@ -89,6 +109,8 @@ const MODELS = {
     const head = box(0.4, 0.38, 0.35, body, 0, 1.08, -0.72);
     eyes(head, 0.2, -0.18);
     head.add(box(0.26, 0.16, 0.05, face, 0, -0.12, -0.19));
+    head.add(box(0.07, 0.1, 0.07, 0xd8d0c0, -0.17, 0.22, 0)); // horns
+    head.add(box(0.07, 0.1, 0.07, 0xd8d0c0, 0.17, 0.22, 0));
     g.add(head);
     const legs = [
       leg(0.16, 0.58, body, -0.22, 0.58, -0.35), leg(0.16, 0.58, body, 0.22, 0.58, -0.35),
@@ -148,6 +170,45 @@ const MODELS = {
     legs.forEach(l => g.add(l));
     return { legs, head };
   },
+  chicken(g) {
+    const white = 0xf2f2f2, beak = 0xe8a428, comb = 0xd83a2e;
+    g.add(box(0.4, 0.35, 0.5, white, 0, 0.32, 0.05)); // body
+    const head = box(0.28, 0.28, 0.28, white, 0, 0.58, -0.22);
+    eyes(head, 0.14, -0.15);
+    head.add(box(0.12, 0.1, 0.1, beak, 0, -0.04, -0.18)); // beak
+    head.add(box(0.08, 0.1, 0.12, comb, 0, 0.18, 0)); // comb
+    g.add(head);
+    const tail = box(0.2, 0.24, 0.07, white, 0, 0.52, 0.32); // tail feathers
+    tail.rotation.x = -0.6;
+    g.add(tail);
+    g.add(box(0.08, 0.2, 0.3, white, -0.24, 0.32, 0.05)); // wings
+    g.add(box(0.08, 0.2, 0.3, white, 0.24, 0.32, 0.05));
+    const legs = [leg(0.06, 0.16, beak, -0.1, 0.16, 0), leg(0.06, 0.16, beak, 0.1, 0.16, 0)];
+    legs.forEach(l => g.add(l));
+    return { legs, head };
+  },
+  skeleton(g) {
+    const bone = 0xcfcfcf, dark = 0x8a8a8a;
+    const legs = [
+      leg(0.14, 0.7, bone, -0.12, 0.7, 0), leg(0.14, 0.7, bone, 0.12, 0.7, 0),
+    ];
+    legs.forEach(l => g.add(l));
+    g.add(box(0.44, 0.55, 0.24, bone, 0, 1.0, 0)); // ribs
+    g.add(box(0.12, 0.5, 0.12, bone, -0.3, 1.05, -0.1)); // arm holding the bow
+    g.add(box(0.12, 0.5, 0.12, bone, 0.3, 1.0, 0));
+    g.add(box(0.06, 0.55, 0.06, dark, -0.3, 1.05, -0.45)); // bow
+    const head = box(0.4, 0.4, 0.4, bone, 0, 1.5, 0);
+    head.add(box(0.09, 0.11, 0.02, 0x1a1a1a, -0.1, 0.02, -0.21));
+    head.add(box(0.09, 0.11, 0.02, 0x1a1a1a, 0.1, 0.02, -0.21));
+    g.add(head);
+    return { legs, head };
+  },
+  slime(g) {
+    return slimeModel(g, 1);
+  },
+  slime_small(g) {
+    return slimeModel(g, 0.5);
+  },
   creeper(g) {
     const green = 0x4aa84a, dark = 0x2f7a3f, face = 0x1a3a1a;
     const legs = [
@@ -189,7 +250,8 @@ export class Mob {
     const t = TYPES[type];
     this.id = nextId++;
     this.type = type;
-    this.hostile = type === 'zombie' || type === 'blaze' || type === 'enderman' || type === 'spider' || type === 'creeper';
+    this.hostile = type === 'zombie' || type === 'blaze' || type === 'enderman' || type === 'spider' || type === 'creeper' ||
+      type === 'skeleton' || type === 'slime' || type === 'slime_small';
     this.flying = type === 'blaze';
     this.shootCd = 2 + Math.random() * 2;
     this.fuseT = 0;
@@ -208,8 +270,9 @@ export class Mob {
     this.walkPhase = 0;
     this.jumpCd = 0;
     this.attackCd = 0;
+    this.eggT = 25 + Math.random() * 35; // chickens lay eggs
+    this.hopT = Math.random() * 0.5;     // slime hop rhythm
     this.flashT = 0;
-    this.burnT = 0;
     this.dead = false;
 
     this.group = new THREE.Group();
@@ -261,8 +324,10 @@ export class Mob {
       const dist = Math.hypot(dx, dz);
       const spider = this.type === 'spider';
       const creeper = this.type === 'creeper';
+      const skeleton = this.type === 'skeleton';
+      const slime = this.type === 'slime' || this.type === 'slime_small';
       // burn in daylight (spiders don't burn — they just turn docile; creepers never burn)
-      if (daylight > 0.5 && !spider && !creeper) {
+      if (daylight > 0.5 && !spider && !creeper && !slime) {
         this.burnT += dt;
         if (this.burnT > 0.4) {
           this.hp -= 3 * dt;
@@ -295,6 +360,23 @@ export class Mob {
               ctx.explode(Math.floor(this.pos.x), Math.floor(this.pos.y), Math.floor(this.pos.z), 3.2);
             }
           }
+        } else if (slime) {
+          // slimes bounce toward the player in hops
+          this.hopT -= dt;
+          if (this.hopT <= 0) {
+            this.hopT = 0.5 + Math.random() * 0.5;
+            this.vel.y = this.type === 'slime' ? 8.5 : 7;
+            wantSpeed = this.speed;
+          }
+        } else if (skeleton) {
+          // skeletons keep bow range and loose arrows
+          this.shootCd -= dt;
+          if (dist > 12) wantSpeed = this.speed;
+          else if (dist < 4) wantSpeed = -this.speed * 0.6;
+          if (this.shootCd <= 0 && dist < 17 && dist > 2.5 && !player.dead) {
+            this.shootCd = 1.6 + Math.random() * 1.2;
+            if (ctx.shootArrow) ctx.shootArrow(this);
+          }
         } else {
           wantSpeed = this.speed;
           const dy = Math.abs((player.pos.y) - this.pos.y);
@@ -315,6 +397,16 @@ export class Mob {
       }
     } else {
       wantSpeed = this.wander(dt);
+    }
+
+    // chickens lay an egg every ~half minute
+    if (this.type === 'chicken' && !this.dead) {
+      this.eggT -= dt;
+      if (this.eggT <= 0) {
+        this.eggT = 30 + Math.random() * 30;
+        if (ctx.drops) ctx.drops.spawn(I.EGG, 1, this.pos.x, this.pos.y + 0.5, this.pos.z);
+        if (ctx.sfx && ctx.sfx.pop) ctx.sfx.pop();
+      }
     }
 
     // smooth turn
@@ -367,6 +459,10 @@ export class Mob {
     this.group.position.set(this.pos.x, this.pos.y, this.pos.z);
     this.group.rotation.y = this.yaw;
     if (this.type === 'creeper') this.group.scale.setScalar(1 + Math.min(this.fuseT, 1.5) / 1.5 * 0.65);
+    else if (this.type === 'slime' || this.type === 'slime_small') { // jelly squish
+      const q = Math.abs(Math.sin(this.walkPhase * 2));
+      this.group.scale.set(1 + q * 0.08, 1 - q * 0.12, 1 + q * 0.08);
+    }
 
     // hurt/burn flash
     if (this.flashT > 0) {
@@ -432,6 +528,8 @@ export class Mob {
 
 const shotGeo = new THREE.BoxGeometry(0.28, 0.28, 0.28);
 const shotMat = new THREE.MeshBasicMaterial({ color: 0xff8c1a });
+const arrowGeo = new THREE.BoxGeometry(0.08, 0.08, 0.6);
+const arrowMat = new THREE.MeshBasicMaterial({ color: 0xd8d0c0 });
 
 export class MobManager {
   constructor(scene, world) {
@@ -445,12 +543,30 @@ export class MobManager {
     this.spiderCap = 4;
     this.blazeCap = 5;
     this.creeperCap = 5;
+    this.skeletonCap = 5;
+    this.slimeCap = 3;
   }
 
   // hide/show everything when the player switches dimension
   setActive(v) {
     for (const m of this.mobs) m.group.visible = v;
     for (const s of this.shots) s.mesh.visible = v;
+  }
+
+  spawnArrow(mob, player) {
+    const ox = mob.pos.x, oy = mob.pos.y + 1.5, oz = mob.pos.z;
+    const tx = player.pos.x - ox, ty = (player.pos.y + 1.3) - oy, tz = player.pos.z - oz;
+    const len = Math.hypot(tx, ty, tz) || 1;
+    const mesh = new THREE.Mesh(arrowGeo, arrowMat);
+    mesh.position.set(ox, oy, oz);
+    mesh.lookAt(ox + tx, oy + ty, oz + tz);
+    this.scene.add(mesh);
+    this.shots.push({
+      kind: 'arrow', dmg: 4,
+      pos: { x: ox, y: oy, z: oz },
+      vel: { x: (tx / len) * 16, y: (ty / len) * 16, z: (tz / len) * 16 },
+      ttl: 3, mesh,
+    });
   }
 
   spawnShot(mob, player) {
@@ -474,19 +590,20 @@ export class MobManager {
       s.ttl -= dt;
       s.pos.x += s.vel.x * dt; s.pos.y += s.vel.y * dt; s.pos.z += s.vel.z * dt;
       s.mesh.position.set(s.pos.x, s.pos.y, s.pos.z);
-      s.mesh.rotation.x += dt * 8; s.mesh.rotation.y += dt * 6;
+      if (s.kind !== 'arrow') { s.mesh.rotation.x += dt * 8; s.mesh.rotation.y += dt * 6; }
       const hitPlayer = !p.dead && !p.creative &&
         Math.abs(s.pos.x - p.pos.x) < 0.6 && Math.abs(s.pos.z - p.pos.z) < 0.6 &&
         s.pos.y > p.pos.y - 0.2 && s.pos.y < p.pos.y + 2.0;
       const b = ctx.world.getBlock(Math.floor(s.pos.x), Math.floor(s.pos.y), Math.floor(s.pos.z));
       const hitBlock = isSolid(b);
       if (hitPlayer) {
-        p.damage(4, ctx.time, 'fire');
-        p.burnT = Math.max(p.burnT, 2);
+        const arrow = s.kind === 'arrow';
+        p.damage(arrow ? (s.dmg || 4) : 4, ctx.time, arrow ? 'attack' : 'fire');
+        if (!arrow) p.burnT = Math.max(p.burnT, 2);
         if (ctx.sfx) ctx.sfx.hurt();
       }
       if (s.ttl <= 0 || hitPlayer || hitBlock) {
-        if (ctx.particles) ctx.particles.burst(s.pos.x, s.pos.y, s.pos.z, [1, 0.55, 0.1], 8, 2.5);
+        if (ctx.particles) ctx.particles.burst(s.pos.x, s.pos.y, s.pos.z, s.kind === 'arrow' ? [0.8, 0.8, 0.8] : [1, 0.55, 0.1], 8, 2.5);
         this.scene.remove(s.mesh);
         this.shots.splice(i, 1);
       }
@@ -495,6 +612,7 @@ export class MobManager {
 
   update(dt, ctx) {
     ctx.shoot = (mob) => { this.spawnShot(mob, ctx.player); if (ctx.sfx) ctx.sfx.fireball(); };
+    ctx.shootArrow = (mob) => { this.spawnArrow(mob, ctx.player); if (ctx.sfx && ctx.sfx.bow) ctx.sfx.bow(); };
     for (const m of this.mobs) m.update(dt, ctx);
     this.updateShots(dt, ctx);
 
@@ -504,6 +622,12 @@ export class MobManager {
       const m = this.mobs[i];
       const far = Math.hypot(m.pos.x - p.x, m.pos.z - p.z) > 80;
       if (m.dead || far) {
+        if (m.dead && m.type === 'slime') { // big slimes split into two small ones
+          for (let k = 0; k < 2; k++) {
+            const baby = this.forceSpawn('slime_small', m.pos.x + (Math.random() - 0.5), m.pos.y + 0.5, m.pos.z + (Math.random() - 0.5));
+            baby.vel.y = 6;
+          }
+        }
         if (m.dead && ctx.particles) {
           const c = new THREE.Color(m.color);
           ctx.particles.burst(m.pos.x, m.pos.y + m.height / 2, m.pos.z, [c.r, c.g, c.b], 16, 3);
@@ -569,15 +693,19 @@ export class MobManager {
     const spiders = this.mobs.filter(m => m.type === 'spider').length;
     const endermen = this.mobs.filter(m => m.type === 'enderman').length;
     const creepers = this.mobs.filter(m => m.type === 'creeper').length;
+    const skeletons = this.mobs.filter(m => m.type === 'skeleton').length;
+    const slimes = this.mobs.filter(m => m.type === 'slime').length;
 
     let type = null;
     if (night && Math.random() < 0.75) {
       if (endermen < 2 && Math.random() < 0.22) type = 'enderman';
+      else if (skeletons < this.skeletonCap && Math.random() < 0.3) type = 'skeleton';
+      else if (slimes < this.slimeCap && Math.random() < 0.2) type = 'slime';
       else if (spiders < this.spiderCap && Math.random() < 0.35) type = 'spider';
       else if (creepers < this.creeperCap && Math.random() < 0.35) type = 'creeper';
       else if (zombies < this.zombieCap) type = 'zombie';
     } else if (passives < this.passiveCap) {
-      type = ['pig', 'sheep', 'cow'][(Math.random() * 3) | 0];
+      type = ['pig', 'sheep', 'cow', 'chicken'][(Math.random() * 4) | 0];
     }
     if (!type) return;
 
@@ -586,7 +714,7 @@ export class MobManager {
     if (surf.y >= 70) return;
     // passive animals prefer grass
     if (!TYPES[type]) return;
-    if (['pig', 'sheep', 'cow'].includes(type) && surf.id !== B.GRASS && surf.id !== B.SAND && surf.id !== B.SNOW) return;
+    if (['pig', 'sheep', 'cow', 'chicken'].includes(type) && surf.id !== B.GRASS && surf.id !== B.SAND && surf.id !== B.SNOW) return;
 
     const mob = new Mob(type, x + 0.5, surf.y + 1.01, z + 0.5);
     this.mobs.push(mob);

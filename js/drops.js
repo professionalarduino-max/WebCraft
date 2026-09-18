@@ -27,6 +27,7 @@ export class DropManager {
 
   spawn(id, n, x, y, z, opts = {}) {
     const entities = opts.stack ? [n] : new Array(n).fill(1);
+    const created = [];
     for (const count of entities) {
       if (this.list.length >= MAX_DROPS) {
         const old = this.list.shift();
@@ -41,13 +42,22 @@ export class DropManager {
           : { x: (Math.random() - 0.5) * 2.5, y: 2.5 + Math.random() * 1.5, z: (Math.random() - 0.5) * 2.5 },
         half: 0.12, height: 0.24,
         age: 0, ttl: opts.ttl || LIFETIME,
+        dmg: opts.dmg || 0, nid: opts.nid || null, tag: opts.tag || null,
         retry: opts.throwDir ? 1.2 : 0, spin: Math.random() * Math.PI * 2,
         mesh,
       };
       mesh.position.set(e.pos.x, e.pos.y, e.pos.z);
       this.scene.add(mesh);
       this.list.push(e);
+      created.push(e);
     }
+    return created;
+  }
+
+  removeByNid(nid) {
+    if (nid == null) return;
+    const i = this.list.findIndex(e => e.nid === nid);
+    if (i >= 0) this._remove(i);
   }
 
   _makeMesh(id) {
@@ -80,9 +90,12 @@ export class DropManager {
       if (e.age > 0.4 && e.retry <= 0 && !p.dead) {
         if (dist < 1.1) {
           // fill partial stacks first; if the inventory is full the item stays
-          const leftover = ctx.inventory.add(e.id, e.n);
+          const leftover = ctx.inventory.add(e.id, e.n, e.dmg || 0, e.tag || null);
           if (leftover < e.n && ctx.onPickup) ctx.onPickup(e.id);
-          if (leftover === 0) { this._remove(i); continue; }
+          if (leftover === 0) {
+            if (e.nid && ctx.sendGone) { try { ctx.sendGone(e.nid); } catch (_) {} }
+            this._remove(i); continue;
+          }
           e.n = leftover;
           e.retry = 1.5;
         } else if (dist < 2.6) {
@@ -119,14 +132,14 @@ export class DropManager {
     return this.list.map(e => [
       e.id, e.n,
       +e.pos.x.toFixed(1), +e.pos.y.toFixed(1), +e.pos.z.toFixed(1),
-      Math.round(e.age), e.ttl,
+      Math.round(e.age), e.ttl, e.dmg || 0, e.tag || null,
     ]);
   }
 
   load(rows) {
     for (const r of rows || []) {
       if (!Array.isArray(r) || !ITEMS[r[0]] || !(r[1] > 0)) continue;
-      this.spawn(r[0], r[1], r[2], r[3], r[4], { stack: true, ttl: r[6] });
+      this.spawn(r[0], r[1], r[2], r[3], r[4], { stack: true, ttl: r[6], dmg: r[7] || 0, tag: r[8] || null });
       const e = this.list[this.list.length - 1];
       e.age = r[5] || 0;
       e.vel = { x: 0, y: 0, z: 0 };

@@ -1,6 +1,31 @@
 WebCraft - Minecraft in your browser (fan remake)
 =================================================
 
+WHAT'S NEW (latest update)
+--------------------------
+* PvP: you can now hit other players. Left-click a player within 3 blocks:
+  they take weapon damage (critical hit while falling), get knocked back and
+  see "*<name>* hit you for N" in chat. Deaths announce "X was slain by Y".
+  Want a peaceful server? Start it with:  node server/mp-server.js --pvp off
+* Redstone and pistons are fixed: levers, buttons, plates, torches, repeaters,
+  comparators, observers, pistons (incl. sticky), TNT, lamps, note blocks and
+  doors all switch on AND off again (before, most devices never reacted).
+* About 50 new blocks:
+  - building: deepslate set, cracked stone bricks, granite / diorite / andesite
+    (rough + polished), terracotta, smooth & chiseled quartz, quartz pillar,
+    cut & smooth sandstone, prismarine (normal / bricks / dark),
+    plus slabs and stairs for quartz, deepslate bricks, blackstone,
+    purpur and prismarine;
+  - Nether: soul sand, basalt, polished basalt, blackstone + polished /
+    polished bricks / chiseled, nether wart block, shroomlight, ancient debris,
+    nether gold ore, crimson & warped stems and planks, nether brick fence;
+  - End: end stone bricks, purpur, purpur pillars, end rods.
+  Every new block is craftable (check the recipe list in the inventory) or
+  smeltable, and all of them are in the creative palette.
+* The Nether now has blackstone / soul sand / basalt biomes, magma crusts,
+  basalt stalactites, shroomlight and ancient debris.
+* The End island now has ruined purpur towers with glowing end rods.
+
 WHAT THIS IS
 ------------
 A complete game: singleplayer with saves + your own multiplayer server.
@@ -9,11 +34,13 @@ The server needs nothing but Node.js - zero dependencies.
 
 PLAY ONLINE RIGHT NOW
 ---------------------
-Game (singleplayer, opens in any browser):
-  https://professionalarduino-max.github.io/WebCraft/
+Play together (the live server - just open this link):
+  https://webcraft-h4g9.onrender.com/
+  It serves the game and the shared world on one address: press "Multiplayer"
+  and the server address is already filled in. Send this link to friends.
 
-Multiplayer server (everyone plays together here):
-  paste your live server link here - see "DEPLOY THE SERVER" below.
+Singleplayer only (GitHub Pages):
+  https://professionalarduino-max.github.io/WebCraft/
 
 
 QUICK START (Windows / Mac / Linux)
@@ -168,7 +195,8 @@ DEPLOY THE SERVER (so friends can play without installing anything)
 1. Push the repository to GitHub.
 2. On render.com: New -> Blueprint -> pick the repository -> Apply.
    render.yaml is already in the repo: no build step, start command included.
-3. Copy the service URL (https://something.onrender.com) and send it to friends.
+3. Copy the service URL and send it to friends. This project's live server is
+   https://webcraft-h4g9.onrender.com/
    That one link serves the game AND the multiplayer - open it, press Multiplayer
    and the server address is filled in automatically.
 4. Optional but recommended: set the repository variable APP_URL (Settings ->

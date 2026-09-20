@@ -90,7 +90,7 @@ export class World {
   // Nether: netherrack floor + ceiling with a cavernous middle, lava ocean,
   // and noise pillars connecting them.
   genNetherChunk(cx, cz) {
-    const data = new Uint8Array(CHUNK * CHUNK * HEIGHT);
+    const data = new Uint16Array(CHUNK * CHUNK * HEIGHT);
     const p = this.pNoise;
     const LAVA_SEA = 26;
     const baseX = cx * CHUNK, baseZ = cz * CHUNK;
@@ -106,10 +106,31 @@ export class World {
           else if (this.pCave1.noise3(wx * 0.05, y * 0.05, wz * 0.05) > 0.42) id = B.NETHERRACK; // pillars
           else if (y <= LAVA_SEA) id = B.LAVA;
           if (id === B.NETHERRACK) {
-            if (hash3(wx, y, wz, this.seed ^ 0x33f1) < 0.014) id = B.QUARTZ_ORE;
+            const h = hash3(wx, y, wz, this.seed ^ 0x33f1);
+            if (h < 0.014) id = B.QUARTZ_ORE;
+            else if (h < 0.0168) id = B.NETHER_GOLD_ORE;
+            else if (y <= floorH + 2 && y >= floorH - 1) {
+              // floor biomes: slow noise picks blackstone / soul sand, faster noise
+              // scatters basalt patches and magma crust
+              const region = fbm2(p, wx * 0.012 + 11, wz * 0.012 - 7, 2);
+              const patch = fbm2(p, wx * 0.09 - 5, wz * 0.09 + 3, 2);
+              if (region < -0.3) id = B.BLACKSTONE;
+              else if (region > 0.28 && patch > 0.3) id = B.SOUL_SAND;
+              else if (patch < -0.45) id = B.BASALT;
+              else if (patch > 0.55 && y >= floorH) id = B.MAGMA;
+            } else if (y > 26 && y < 42 && hash3(wx >> 2, y >> 2, wz >> 2, this.seed ^ 0x55aa) < 0.0035) {
+              id = B.ANCIENT_DEBRIS;   // very rare, only in the deep layers
+            }
           } else if (id === B.AIR && y >= ceilH - 2) {
-            // glowstone clusters hang under the ceiling
-            if (hash3(wx >> 1, y >> 1, wz >> 1, this.seed ^ 0x9d5) < 0.05) id = B.GLOWSTONE;
+            // glowstone clusters hang under the ceiling, shroomlight is rarer
+            const h = hash3(wx >> 1, y >> 1, wz >> 1, this.seed ^ 0x9d5);
+            if (h < 0.05) id = B.GLOWSTONE;
+            else if (h < 0.058) id = B.SHROOMLIGHT;
+          } else if (id === B.AIR && y < ceilH) {
+            // basalt stalactites under the ceiling
+            const spike = hash3(wx, 3, wz, this.seed ^ 0x7a11) < 0.045
+              ? 2 + ((hash3(wx, 5, wz, this.seed ^ 0x1c) * 5) | 0) : 0;
+            if (spike && y >= ceilH - spike) id = B.BASALT;
           }
           data[lx + lz * CHUNK + y * CHUNK * CHUNK] = id;
         }
@@ -128,7 +149,7 @@ export class World {
 
   // The End: a floating end-stone island in the void, ringed by obsidian pillars.
   genEndChunk(cx, cz) {
-    const data = new Uint8Array(CHUNK * CHUNK * HEIGHT);
+    const data = new Uint16Array(CHUNK * CHUNK * HEIGHT);
     const p = this.pNoise;
     const baseX = cx * CHUNK, baseZ = cz * CHUNK;
     // obsidian pillar ring (deterministic positions)
@@ -136,6 +157,13 @@ export class World {
     for (let i = 0; i < 6; i++) {
       const a = (i / 6) * Math.PI * 2;
       pillars.push({ x: Math.round(Math.cos(a) * 26), z: Math.round(Math.sin(a) * 26), top: 50 + (i % 3) * 4 });
+    }
+    // ruined towers: a deterministic ring, radius stays well inside the island
+    const ruins = [];
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2 + hash3(i, 1, 0, this.seed ^ 0x77) * 0.5;
+      const rad = 9 + (i % 3) * 10;   // 9 / 19 / 29 blocks from the center
+      ruins.push({ x: Math.round(Math.cos(a) * rad), z: Math.round(Math.sin(a) * rad) });
     }
     for (let lz = 0; lz < CHUNK; lz++) {
       for (let lx = 0; lx < CHUNK; lx++) {
@@ -157,6 +185,34 @@ export class World {
             }
           }
         }
+        // purpur ruins: a ring of small ruined towers of End stone bricks,
+        // purpur and end rods, always on the island
+        if (dist < R) {
+          for (let ri = 0; ri < ruins.length; ri++) {
+            const ru = ruins[ri];
+            const dx = wx - ru.x, dz = wz - ru.z;
+            if (Math.abs(dx) <= 2 && Math.abs(dz) <= 2) {
+              const edge = Math.abs(dx) === 2 || Math.abs(dz) === 2;
+              const corner = Math.abs(dx) === 2 && Math.abs(dz) === 2;
+              let baseY = -1;
+              for (let y = Math.min(HEIGHT - 3, 60); y >= 2; y--) {
+                if (data[lx + lz * CHUNK + y * CHUNK * CHUNK] === B.END_STONE) { baseY = y; break; }
+              }
+              if (baseY > 0) {
+                const H = 5 + ((hash3(ri, 9, 0, this.seed ^ 0xcc) * 3) | 0);
+                for (let y = baseY + 1; y <= baseY + H && y < HEIGHT - 2; y++) {
+                  const idx = lx + lz * CHUNK + y * CHUNK * CHUNK;
+                  if (y === baseY + H) { data[idx] = corner ? B.PURPUR_PILLAR : B.PURPUR; continue; }
+                  if (corner) data[idx] = (y - baseY) % 3 === 0 ? B.PURPUR_PILLAR : B.END_STONE_BRICK;
+                  else if (edge) data[idx] = B.END_STONE_BRICK;
+                }
+                if (corner && baseY + H + 1 < HEIGHT - 2) {
+                  data[lx + lz * CHUNK + (baseY + H + 1) * CHUNK * CHUNK] = B.END_ROD;
+                }
+              }
+            }
+          }
+        }
       }
     }
     const ce = this.edits.get(key(cx, cz));
@@ -175,7 +231,7 @@ export class World {
     if (this.dim === 'end') return this.genEndChunk(cx, cz);
     if (this.gen === 'flat') return this.genFlatChunk(cx, cz);
     if (this.gen === 'oneblock') return this.genOneblockChunk(cx, cz);
-    const data = new Uint8Array(CHUNK * CHUNK * HEIGHT);
+    const data = new Uint16Array(CHUNK * CHUNK * HEIGHT);
     const PAD = 3; // extra columns so trees from neighbor chunks reach in
     const W = CHUNK + PAD * 2;
     const cols = new Array(W * W);
@@ -345,7 +401,7 @@ export class World {
 
   // superflat: bedrock + dirt + grass, no caves/trees/ores
   genFlatChunk(cx, cz) {
-    const data = new Uint8Array(CHUNK * CHUNK * HEIGHT);
+    const data = new Uint16Array(CHUNK * CHUNK * HEIGHT);
     for (let lz = 0; lz < CHUNK; lz++) {
       for (let lx = 0; lx < CHUNK; lx++) {
         const i = lx + lz * CHUNK;
@@ -361,7 +417,7 @@ export class World {
 
   // one block: void with a 5x5 safety platform + the infinite block at (0,63,0)
   genOneblockChunk(cx, cz) {
-    const data = new Uint8Array(CHUNK * CHUNK * HEIGHT); // all AIR
+    const data = new Uint16Array(CHUNK * CHUNK * HEIGHT); // all AIR
     if (cx === 0 && cz === 0) {
       for (let lx = 0; lx <= 4; lx++) {
         for (let lz = 0; lz <= 4; lz++) {

@@ -1,8 +1,17 @@
 # ⛏ WebCraft — Minecraft in your browser
 
-**▶ Play online:** https://professionalarduino-max.github.io/WebCraft/ &nbsp;·&nbsp; **Multiplayer server:** (https://webcraft-h4g9.onrender.com/) (see [Deploy the multiplayer server](#deploy-the-multiplayer-server))
+**▶ Play in the browser:** https://professionalarduino-max.github.io/WebCraft/ (singleplayer, GitHub Pages)
+**🌐 Play with everyone:** https://webcraft-h4g9.onrender.com/ — the live multiplayer server: it serves the game *and* the shared world, so just open the link, press **Multiplayer** and the server address is filled in automatically.
 
 A 3D Minecraft clone that runs entirely in the browser. No build step, no dependencies to install — just static HTML/JS (Three.js loaded from a CDN), so it works out of the box on GitHub Pages.
+
+## What's new in this update
+
+- **Player-vs-player combat** — hit another player with the left mouse button: they take real damage (sword damage + falling critical hits), get knocked back, see a red flash and a "*<name>* hit you for N" chat line, and die properly ("*X was slain by Y*") with a normal respawn. Reach is 3 blocks, spam is throttled to 4 hits/second, and the server validates every hit. Hosting a friendly server? Start it with `node server/mp-server.js --pvp off` (or `MP_PVP=0`) and players cannot hurt each other at all.
+- **Redstone and pistons actually work now** — two engine bugs are fixed: the power scan used to flood through the terrain and give up before it reached the lamp/piston/door (so almost nothing reacted), and a lit lamp used to feed the dust that powered it, latching itself on forever. Levers, buttons, plates, torches, repeaters, comparators, observers, pistons (normal and sticky), dispensers, droppers, hoppers, TNT, note blocks and doors all react reliably — including turning *off* again.
+- **~50 new blocks for building, the Nether and the End** — deepslate set (deepslate, cobbled, polished, bricks, chiseled, cracked stone bricks), granite / diorite / andesite (rough + polished), terracotta, smooth/ chiseled quartz, quartz pillar, cut & smooth sandstone, prismarine (normal / bricks / dark) with slabs and stairs for quartz, deepslate bricks, blackstone, purpur and prismarine; Nether set: soul sand, basalt & polished basalt, blackstone & polished/chiseled/brick variants, nether wart block, shroomlight, ancient debris, nether gold ore, crimson and warped stems & planks, nether brick fences; End set: end stone bricks, purpur, purpur pillars, end rods (they glow). All of them are craftable (or smeltable) and appear in the creative palette.
+- **The Nether and the End got real content** — netherrack floor biomes of blackstone, soul sand and basalt, magma crusts, basalt stalactites under the ceiling, shroomlight clusters, nether gold ore veins and (very rarely) ancient debris; the End island now carries ruined purpur towers of end stone bricks and purpur pillars topped with glowing end rods.
+- **Bigger block-id space** — worlds are stored with 16-bit block ids, so future block updates never collide with saved worlds. Existing saves keep working.
 
 ## Features
 
@@ -35,6 +44,7 @@ A 3D Minecraft clone that runs entirely in the browser. No build step, no depend
 - **World persistence** — your edits, inventory, position, and time of day auto-save to `localStorage`
 - **Juice** — block-break particles, procedural sound effects, ambient-occlusion shading, held-item viewmodel, damage vignette
 
+- **PvP (NEW)** — players can damage each other: weapon damage, critical hits while falling, knockback, hurt flash, kill feed ("was slain by"), respawn; server-side validation with a reach limit and a hit-rate throttle, and `--pvp off` for a peaceful server
 - **Multiplayer** — run `node server/mp-server.js` (zero dependencies), press ⛁ Multiplayer, join with friends: shared blocks and thrown items, live player avatars (walk/sneak/sprint/swim/fly poses, held item, nameplates tinted per player), world chat with `/tell` and `/me`, a **Tab player list** (health, dimension, ping bars, operator stars), operator `/kick` and `/op`, synced time & weather, death and dimension-change announcements, and a world that persists in `server/db.json`
 - **Multiplayer that recovers** — automatic reconnection with backoff if the server or Wi‑Fi blinks (you keep playing and get re-synced), a live connection status + ping readout (`/ping`, F3, Tab), and an **edit outbox**: blocks you place while offline are remembered and pushed the moment the connection is back, so builds are never lost
 - **World stays in sync** — edits made anywhere on the map (even far outside your render distance) are stored and replayed when you get there, so a friend's far-away base is never "missing"; the whole world is also re-sent when you rejoin
@@ -46,6 +56,9 @@ A 3D Minecraft clone that runs entirely in the browser. No build step, no depend
 - **Camera modes (V / F5)** — first person, third-person back and front views with an animated player character
 - **Inventory player preview** — a 3D Steve in the inventory that mirrors your equipped armor (drag to rotate)
 - **More blocks & gear** — coal blocks, jack o'lanterns, mossy stone bricks, spruce/sandstone stairs, spruce/birch slabs, blue orchids, alliums, cobwebs (they slow you down!), enchanting tables, jukeboxes (they play music!), note blocks (click to change pitch), plus golden tools and armor
+- **Deepslate, stone & terracotta (NEW)** — deepslate / cobbled / polished / bricks / chiseled, cracked stone bricks, granite, diorite and andesite (rough and polished), terracotta (smelt clay), smooth & chiseled quartz, quartz pillars, cut and smooth sandstone, prismarine, dark prismarine and prismarine bricks — with matching slabs and stairs
+- **Nether building set (NEW)** — soul sand, basalt, polished basalt, blackstone, polished blackstone, polished blackstone bricks, chiseled blackstone, nether wart block, shroomlight (glows), ancient debris, nether gold ore, crimson and warped stems and planks, nether brick fences
+- **End building set (NEW)** — end stone bricks, purpur blocks, purpur pillars and end rods, plus ruined purpur towers that generate on the End island
 - **Minecraft-style sound** — material-based digging/breaking/placing, footsteps, UI clicks, splash, jukebox tunes, calm generative music (♫/🔊 toggles in the menu), and a dirt-background menu with splash text
 - **Creative palette tabs** — filter all blocks & items by Blocks / Deco / Gear / Food / Items, middle-click to pick any block
 

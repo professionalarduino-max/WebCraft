@@ -87,17 +87,24 @@ export function powerLevelAt(world, x, y, z) {
 }
 
 // weak power carried by a solid conductor cell (level-based, 1 block only)
-export function blockLevelAt(world, x, y, z, id) {
+export function blockLevelAt(world, x, y, z, id, dustPow) {
   if (id === undefined) id = world.getBlock(x, y, z);
-  const blk = BLOCKS[id];
-  const conductor = blk && blk.opaque && !isWire(id) && !isTorch(id) && !isRep(id) && !isComp(id) && !isObs(id) && !isPiston(id) && !isBulb(id) && id !== B.TARGET;
+  const conductor = conductsPower(id);
   if (!conductor) return staticEmit(world, x, y, z, id);
   let best = staticEmit(world, x, y, z, id);
   for (const [dx, dy, dz] of DIRS6) {
     const nx = x + dx, ny = y + dy, nz = z + dz;
     const nid = world.getBlock(nx, ny, nz);
     if (nid === undefined) continue;
-    if (nid === B.REDSTONE_DUST_ON) return 15;
+    if (isWire(nid)) {
+      // during updatePower the wire variant is still the old one, so the level
+      // must come from the fixpoint map - otherwise a wire that is turning off
+      // keeps powering the block under it and latches itself on forever
+      const lvl = dustPow ? (dustPow.get(k3(nx, ny, nz)) | 0) : (nid === B.REDSTONE_DUST_ON ? 15 : 0);
+      if (lvl > best) best = lvl;
+      if (best >= 15) return 15;
+      continue;
+    }
     const e = Math.max(staticEmit(world, nx, ny, nz, nid), directedInto(world, nx, ny, nz, -dx, -dy, -dz));
     if (e > best) best = e;
     if (best >= 15) return 15;
@@ -115,6 +122,26 @@ function emitToward(world, x, y, z, dx, dy, dz, dustPow, torchOn) {
   return Math.max(staticEmit(world, x, y, z, id), directedInto(world, x, y, z, dx, dy, dz));
 }
 
+// Which blocks carry weak power from one cell to the next? Only plain solid
+// blocks. Everything the redstone engine handles itself (wires, torches,
+// devices) plus lamps, TNT, levers, buttons, plates, sensors and containers must
+// NOT conduct - otherwise a lamp feeds the dust that powers it and latches it on
+// forever, and a lever next to a wall transmits power that is not there.
+const conductsPower = (id) => {
+  const blk = BLOCKS[id];
+  if (!blk || !blk.opaque) return false;
+  if (isWire(id) || isTorch(id) || isRep(id) || isComp(id) || isObs(id) || isPiston(id) || isBulb(id)) return false;
+  if (id === B.PISTON_HEAD || id === B.TARGET || id === B.REDSTONE_BLOCK) return false;
+  if (id === B.LEVER || id === B.LEVER_ON || id === B.BUTTON || id === B.BUTTON_ON) return false;
+  if (id === B.PLATE || id === B.PLATE_ON || id === B.SENSOR || id === B.SENSOR_ON) return false;
+  if (id === B.LAMP || id === B.LAMP_ON || id === B.NOTE_BLOCK || id === B.TNT) return false;
+  if (id === B.HOPPER || id === B.DISPENSER || id === B.DROPPER) return false;
+  if (id === B.DOOR || id === B.DOOR_TOP || id === B.DOOR_WOOD_B || id === B.DOOR_IRON_B) return false;
+  if (id === B.DOOR_WOOD_BOT_OPEN || id === B.DOOR_IRON_BOT_OPEN) return false;
+  if (blk.container) return false;
+  return true;
+};
+
 const isReceiver = (id) => id === B.LAMP || id === B.LAMP_ON || id === B.NOTE_BLOCK || id === B.TNT || id === B.DOOR_WOOD_B || id === B.DOOR_WOOD_BOT_OPEN || id === B.DOOR_IRON_B || id === B.DOOR_IRON_BOT_OPEN;
 
 // power at a cell during updatePower (reads dust/torch fixpoint maps, directed devices, conductors)
@@ -129,7 +156,7 @@ function poweredAt(world, x, y, z, dustPow, torchOn, emitCache) {
     else {
       e = Math.max(
         emitToward(world, nx, ny, nz, -dx, -dy, -dz, dustPow, torchOn),
-        blockLevelAt(world, nx, ny, nz)
+        blockLevelAt(world, nx, ny, nz, undefined, dustPow)
       );
       if (emitCache) emitCache.set(ck, e);
     }
@@ -140,6 +167,9 @@ function poweredAt(world, x, y, z, dustPow, torchOn, emitCache) {
 }
 
 // recompute redstone in a region around (x,y,z). Returns action list for main.js.
+let lastScan = null;   // diagnostics for the tests: what the last scan collected
+export const rsLastScan = () => lastScan;
+
 export function updatePower(world, x, y, z) {
   const actions = [];
   const dust = new Map(), torch = new Map(), recv = new Map();
@@ -158,39 +188,45 @@ export function updatePower(world, x, y, z) {
     else if (isPiston(id)) { if (!piston.has(k)) piston.set(k, { x: cx, y: cy, z: cz, id }); kind = 'piston'; }
     else if (isReceiver(id)) { if (!recv.has(k)) recv.set(k, { x: cx, y: cy, z: cz, id }); kind = 'recv'; }
     else if (isObs(id)) kind = 'obs';
-    else {
-      const blk = BLOCKS[id];
-      if (blk && blk.opaque) kind = 'cond';
+    else if (conductsPower(id)) kind = 'cond';
+    // Solid blocks are filed but never queued: a conductor carries weak power
+    // exactly one block (see pushNeighborsOf). Queueing them made the scan walk
+    // through the whole ground of the world, burn its step budget and miss the
+    // actual components - the reason levers/pistons/TNT often did not react.
+    if (kind === 'other' || kind === 'obs' || kind === 'cond') {
+      if (!seen.has(k)) seen.add(k);
+      return kind;
     }
-    if ((kind === 'other' || kind === 'obs') && !seen.has(k)) { seen.add(k); return kind; }
     if (!seen.has(k)) { seen.add(k); stack.push([cx, cy, cz]); }
     return kind;
   };
   const pushNeighborsOf = (cx, cy, cz, allowDown) => {
+    const selfWire = isWire(world.getBlock(cx, cy, cz));
     for (const [dx, dy, dz] of DIRS6) {
-      if (dy !== 0 && !allowDown && (world.getBlock(cx, cy, cz) === B.REDSTONE_DUST || world.getBlock(cx, cy, cz) === B.REDSTONE_DUST_ON)) continue;
-      fileCell(cx + dx, cy + dy, cz + dz);
+      if (dy !== 0 && !allowDown && selfWire) continue;   // wires do not reach up/down
+      const nx = cx + dx, ny = cy + dy, nz = cz + dz;
+      if (fileCell(nx, ny, nz) === 'cond') {
+        // a solid block touching a redstone part is the only way power crosses it
+        // (torch -> wall -> lamp); file the cells around that block once
+        for (const [ex, ey, ez] of DIRS6) {
+          if (ex === -dx && ey === -dy && ez === -dz) continue;
+          fileCell(nx + ex, ny + ey, nz + ez);
+        }
+      }
     }
   };
+  // The scan has to expand from the changed cell even when that cell is a pure
+  // source (lever, button, pressure plate, redstone block) or a plain solid
+  // block: fileCell() only queues wires/torches/devices/conductors, so a lever
+  // switched on used to leave every neighbour (dust, lamp, piston, TNT) asleep.
   fileCell(x, y, z);
+  if (!stack.some(([sx, sy, sz]) => sx === x && sy === y && sz === z)) stack.push([x, y, z]);
   let guard = 0;
   while (stack.length && guard++ < 1400) {
     const [cx, cy, cz] = stack.pop();
     const id = world.getBlock(cx, cy, cz);
     if (id === undefined) continue;
     pushNeighborsOf(cx, cy, cz, !isWire(id));
-    if (BLOCKS[id] && BLOCKS[id].opaque && !isWire(id)) {
-      for (const [dx, dy, dz] of DIRS6) {
-        const nx = cx + dx, ny = cy + dy, nz = cz + dz;
-        if (world.getBlock(nx, ny, nz) === undefined) continue;
-        if (fileCell(nx, ny, nz) === 'cond') {
-          for (const [ex, ey, ez] of DIRS6) {
-            if (ex === -dx && ey === -dy && ez === -dz) continue;
-            fileCell(nx + ex, ny + ey, nz + ez);
-          }
-        }
-      }
-    }
   }
   // fixpoint: dust levels + torch states
   const dustPow = new Map(), torchOn = new Map();
@@ -205,7 +241,7 @@ export function updatePower(world, x, y, z) {
         const nx = c.x + dx, ny = c.y, nz = c.z + dz;
         const e = Math.max(
           emitToward(world, nx, ny, nz, -dx, 0, -dz, dustPow, torchOn),
-          blockLevelAt(world, nx, ny, nz)
+          blockLevelAt(world, nx, ny, nz, undefined, dustPow)
         );
         const cand = (isWire(world.getBlock(nx, ny, nz)) ? e - 1 : e);
         if (cand > best) best = cand;
@@ -230,6 +266,13 @@ export function updatePower(world, x, y, z) {
     const want = torchOn.get(k) ? B.RTORCH : B.RTORCH_OFF;
     if (want !== c.id) world.setBlock(c.x, c.y, c.z, want);
   }
+  lastScan = {
+    start: [x, y, z],
+    dust: [...dust.keys()], torch: [...torch.keys()], recv: [...recv.keys()],
+    piston: [...piston.keys()], rep: [...rep.keys()], comp: [...comp.keys()],
+    buld: [...bulb.keys()],
+    dustPow: [...dustPow.entries()], torchOn: [...torchOn.entries()],
+  };
   const now = world._rsNow || 0;
   let recheck = false;
   const emitCache = new Map();
@@ -361,7 +404,7 @@ function pushBlocks(world, x, y, z, dx, dy, dz) {
     if (id === undefined) return null;
     if (id === B.AIR) break;
     if (UNPUSHABLE.has(id)) return null;
-    if (world.hasDataAt && world.hasDataAt(cx, cy, cz)) return null;
+    if (world.hasDataAt && !world.hasDataAt(cx, cz)) return null;   // chunk must be loaded
     chain.push({ x: cx, y: cy, z: cz, id });
     cx += dx; cy += dy; cz += dz;
   }
@@ -404,7 +447,7 @@ function doRetract(world, px, py, pz, f, baseId) {
   if (baseId === B.STICKY_PISTON) {
     const bx = hx + dx, by = hy + dy, bz = hz + dz;
     const bid = world.getBlock(bx, by, bz);
-    if (bid !== undefined && bid !== B.AIR && !UNPUSHABLE.has(bid) && !(world.hasDataAt && world.hasDataAt(bx, by, bz))) {
+    if (bid !== undefined && bid !== B.AIR && !UNPUSHABLE.has(bid) && !(world.hasDataAt && !world.hasDataAt(bx, bz))) {
       const data = rsData(world), lvls = rsLvls(world), pend = rsPend(world);
       const ck = k3(bx, by, bz), tk = k3(hx, hy, hz);
       const saved = data.get(ck), savedLvl = lvls.get(ck), savedPend = pend.get(ck);

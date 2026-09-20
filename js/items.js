@@ -168,6 +168,10 @@ export const SMELTING = {
   [B.STONE]: B.SMOOTH_STONE,
   [B.CLAY]: B.BRICKS,
   [B.NETHERRACK]: B.NETHER_BRICK,
+  [B.CLAY]: B.TERRACOTTA,
+  [B.SANDSTONE]: B.SMOOTH_SANDSTONE,
+  [B.QUARTZ_BLOCK]: B.SMOOTH_QUARTZ,
+  [B.STONE_BRICK]: B.CRACKED_STONE_BRICK,
   [B.LOG]: I.CHARCOAL,
   [B.BIRCH_LOG]: I.CHARCOAL,
   [B.SPRUCE_LOG]: I.CHARCOAL,
@@ -413,11 +417,17 @@ const slabRecipes = [
   [B.OAK_SLAB, B.PLANK], [B.COBBLE_SLAB, B.COBBLE], [B.STONE_SLAB, B.SMOOTH_STONE],
   [B.STONE_BRICK_SLAB, B.STONE_BRICK], [B.BRICK_SLAB, B.BRICKS], [B.SANDSTONE_SLAB, B.SANDSTONE],
   [B.SPRUCE_SLAB, B.SPRUCE_PLANK], [B.BIRCH_SLAB, B.BIRCH_PLANK],
+  [B.QUARTZ_SLAB, B.SMOOTH_QUARTZ], [B.DEEPSLATE_BRICK_SLAB, B.DEEPSLATE_BRICK],
+  [B.BLACKSTONE_SLAB, B.POLISHED_BLACKSTONE], [B.PURPUR_SLAB, B.PURPUR],
+  [B.PRISMARINE_SLAB, B.PRISMARINE],
 ].map(([out, m]) => shaped(out, 6, ['MMM'], { M: m }));
 const stairRecipes = [
   [B.OAK_STAIRS, B.PLANK], [B.COBBLE_STAIRS, B.COBBLE],
   [B.STONE_BRICK_STAIRS, B.STONE_BRICK], [B.BRICK_STAIRS, B.BRICKS],
   [B.SPRUCE_STAIRS, B.SPRUCE_PLANK], [B.SANDSTONE_STAIRS, B.SANDSTONE],
+  [B.QUARTZ_STAIRS, B.SMOOTH_QUARTZ], [B.DEEPSLATE_BRICK_STAIRS, B.DEEPSLATE_BRICK],
+  [B.BLACKSTONE_STAIRS, B.POLISHED_BLACKSTONE], [B.PURPUR_STAIRS, B.PURPUR],
+  [B.PRISMARINE_STAIRS, B.PRISMARINE],
 ].map(([out, m]) => shaped(out, 4, ['M..', 'MM.', 'MMM'], { M: m }));
 
 export const RECIPES = [
@@ -500,6 +510,49 @@ export const RECIPES = [
   shaped(B.HOPPER, 1, ['I.I', 'ICI', '.I.'], { I: I.IRON_INGOT, C: B.CHEST }),
   shaped(B.BULB, 1, ['GAG', 'ARA', 'GAG'], { G: B.GLASS, A: B.AMETHYST, R: I.REDSTONE }),
   shaped(B.TARGET, 1, ['R.R', 'RHR', 'R.R'], { R: I.REDSTONE, H: B.HAY }),
+
+  // --- building set ---------------------------------------------------------
+  shapeless(B.DEEPSLATE, 1, [B.STONE, I.COAL]),
+  shapeless(B.COBBLED_DEEPSLATE, 1, [B.DEEPSLATE, B.COBBLE]),
+  shaped(B.POLISHED_DEEPSLATE, 4, ['DD', 'DD'], { D: B.DEEPSLATE }),
+  shaped(B.DEEPSLATE_BRICK, 4, ['DD', 'DD'], { D: B.POLISHED_DEEPSLATE }),
+  shapeless(B.CHISELED_DEEPSLATE, 1, [B.DEEPSLATE_BRICK_SLAB, B.DEEPSLATE_BRICK_SLAB]),
+  shapeless(B.DIORITE, 2, [B.STONE, I.QUARTZ]),
+  shaped(B.POLISHED_DIORITE, 4, ['DD', 'DD'], { D: B.DIORITE }),
+  shapeless(B.GRANITE, 1, [B.DIORITE, I.REDSTONE]),
+  shaped(B.POLISHED_GRANITE, 4, ['GG', 'GG'], { G: B.GRANITE }),
+  shapeless(B.ANDESITE, 1, [B.DIORITE, B.COBBLE]),
+  shaped(B.POLISHED_ANDESITE, 4, ['AA', 'AA'], { A: B.ANDESITE }),
+  shaped(B.QUARTZ_PILLAR, 2, ['Q', 'Q'], { Q: B.QUARTZ_BLOCK }),
+  shapeless(B.CHISELED_QUARTZ, 1, [B.QUARTZ_SLAB, B.QUARTZ_SLAB]),
+  shaped(B.CUT_SANDSTONE, 4, ['SS', 'SS'], { S: B.SANDSTONE }),
+  shapeless(B.PRISMARINE, 1, [B.SAND, I.LAPIS]),
+  shaped(B.PRISMARINE_BRICK, 4, ['PP', 'PP'], { P: B.PRISMARINE }),
+  shapeless(B.DARK_PRISMARINE, 1, [B.PRISMARINE_BRICK, I.COAL]),
+  shaped(B.NETHER_BRICK_FENCE, 6, ['NNN', 'NNN'], { N: B.NETHER_BRICK }),
+
+  // --- Nether set -----------------------------------------------------------
+  shapeless(B.SOUL_SAND, 2, [B.SAND, I.GUNPOWDER]),
+  shapeless(B.BASALT, 2, [B.NETHERRACK, I.COAL]),
+  shaped(B.POLISHED_BASALT, 4, ['BB', 'BB'], { B: B.BASALT }),
+  shapeless(B.BLACKSTONE, 2, [B.NETHERRACK, B.COBBLE]),
+  shaped(B.POLISHED_BLACKSTONE, 4, ['BB', 'BB'], { B: B.BLACKSTONE }),
+  shaped(B.POLISHED_BLACKSTONE_BRICK, 4, ['BB', 'BB'], { B: B.POLISHED_BLACKSTONE }),
+  shapeless(B.CHISELED_BLACKSTONE, 1, [B.BLACKSTONE_SLAB, B.BLACKSTONE_SLAB]),
+  shapeless(B.NETHER_WART_BLOCK, 1, [B.NETHERRACK, I.REDSTONE]),
+  shapeless(B.SHROOMLIGHT, 1, [B.GLOWSTONE, B.RED_MUSHROOM]),
+  shapeless(B.NETHER_GOLD_ORE, 1, [B.NETHERRACK, I.GOLD_INGOT]),
+  shapeless(B.ANCIENT_DEBRIS, 1, [B.NETHERRACK, I.GOLD_INGOT, I.GOLD_INGOT]),
+  shapeless(B.CRIMSON_STEM, 1, [B.LOG, I.REDSTONE]),
+  shaped(B.CRIMSON_PLANK, 4, ['L'], { L: B.CRIMSON_STEM }),
+  shapeless(B.WARPED_STEM, 1, [B.LOG, I.LAPIS]),
+  shaped(B.WARPED_PLANK, 4, ['L'], { L: B.WARPED_STEM }),
+
+  // --- End set --------------------------------------------------------------
+  shaped(B.END_STONE_BRICK, 4, ['EE', 'EE'], { E: B.END_STONE }),
+  shapeless(B.PURPUR, 1, [B.END_STONE, I.ENDER_PEARL]),
+  shaped(B.PURPUR_PILLAR, 2, ['P', 'P'], { P: B.PURPUR }),
+  shaped(B.END_ROD, 2, ['B', 'E'], { B: I.BLAZE_ROD, E: B.END_STONE }),
 ];
 
 // Match the crafting grid (row-major array of itemId|null, always 3x3)

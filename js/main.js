@@ -3,7 +3,7 @@
 // HUD, day/night, save/load.
 
 import * as THREE from 'three';
-import { B, BLOCKS, TILE, buildAtlas, tileUV, computeAvgColors, isSolid, blockBoxes, emitBox, emitCross } from './blocks.js';
+import { B, BLOCKS, TILE, buildAtlas, tileUV, computeAvgColors, isSolid, blockBoxes, emitBox, emitCross, ATLAS_COLS } from './blocks.js';
 import { World, CHUNK, HEIGHT, SEA } from './world.js';
 import { Player } from './player.js';
 import { MobManager, Dragon } from './mobs.js';
@@ -15,9 +15,9 @@ import { STRUCT_BUILDERS } from './structures.js';
 import { initChat, openChat, chatMessage, chatSys, chatErr, isChatOpen, submitChat } from './chat.js';
 import { loadWorlds, storeWorlds, saveKeyFor, hashSeed, touchWorld, deleteWorldSave, newWorldId } from './worlds.js';
 import { mulberry32 } from './noise.js';
-import { I, ITEMS, breakInfo, RECIPES, matchGrid, itemIcon, initItemIcons, itemDamage, maxStack, maxDamage, TIER_NAMES, SMELT_TIME } from './items.js';
+import { I, ITEMS, breakInfo, RECIPES, matchGrid, itemIcon, initItemIcons, itemDamage, maxStack, maxDamage, TIER_NAMES, SMELT_TIME, SMELTING } from './items.js';
 import { Inventory, encSlot, decSlot } from './inventory.js';
-import { tickRedstone, powerLevelAt, isRep, isComp } from './redstone.js';
+import { tickRedstone, powerLevelAt, isRep, isComp, rsLastScan } from './redstone.js';
 import { DropManager } from './drops.js';
 import { Furnaces, Chests } from './furnace.js';
 
@@ -1422,11 +1422,16 @@ function scatterInventory() {
   inventory._c();
 }
 
+let lastPlayerAttacker = null;   // set when another player lands the killing-blow-ish hit
+let dbgLastAttack = null;        // diagnostics for the tests: what the last swing hit
+
 player.onDeath = () => {
   {
     const nm = (mpSession && net.online) ? net.name : 'You';
     const msgs = { fall: 'hit the ground too hard', lava: 'tried to swim in lava', fire: 'burned to death', void: 'fell out of the world', starve: 'starved to death', drown: 'drowned', attack: 'was slain', arrow: 'was shot', suicide: 'took the easy way out', generic: 'died' };
-    const dt = `${nm} ${msgs[player.lastDmg] || msgs.generic}`;
+    const dt = (player.lastDmg === 'attack' && lastPlayerAttacker)
+      ? `${nm} was slain by ${lastPlayerAttacker}`
+      : `${nm} ${msgs[player.lastDmg] || msgs.generic}`;
     if (mpSession && net.online) net.sendDied(dt); else chatMessage(dt, '#ff8080');
   }
   sfx.die();
@@ -1438,6 +1443,7 @@ player.onDeath = () => {
 };
 
 document.getElementById('respawnBtn').addEventListener('click', () => {
+  lastPlayerAttacker = null;
   if (dim !== 'overworld') setDimension('overworld'); // you wake up back home
   player.respawn();
   afterTeleport(); // tell the server this jump is legit
@@ -2545,6 +2551,26 @@ function updateMining(dt) {
     }
     return;
   }
+  // PvP: another player under the crosshair takes the hit instead of the block
+  if (mpSession && net.online) {
+    const pHit = raycastRemotePlayers(eye.x, eye.y, eye.z, dir.x, dir.y, dir.z, MOB_REACH);
+    if (pHit && (!hit || pHit.t < hit.t)) {
+      stopMining();
+      if (punchCd <= 0) {
+        punchCd = 0.5;
+        swingT = 0;
+        player.exhaustion += 0.1;
+        const { dmg, crit } = attackDamage();
+        net.sendHit(pHit.id, dmg, crit);
+        dbgLastAttack = { kind: 'player', id: pHit.id, dmg, crit, t: +pHit.t.toFixed(2) };
+        damageHeld();
+        const g = pHit.r.group.position;
+        particles.burst(g.x, g.y + 1.1, g.z, [0.85, 0.2, 0.2], 10, 3);
+        if (crit) critFx(g.x, g.y + 1.1, g.z); else sfx.hit();
+      }
+      return;
+    }
+  }
   // the dragon is a huge target — check it before blocks
   if (dim === 'end' && dragon && !dragon.dead) {
     const dt2 = dragon.rayHit(eye.x, eye.y, eye.z, dir.x, dir.y, dir.z, MOB_REACH + 2);
@@ -2565,6 +2591,7 @@ function updateMining(dt) {
   }
   if (!hit) { stopMining(); return; }
 
+  dbgLastAttack = { kind: 'block', id: hit.id };
   // creative: everything (even bedrock) breaks instantly
   if (isCreative()) {
     stopMining();
@@ -3958,6 +3985,32 @@ function pasteStructure(key, bx, by, bz) {
   return n;
 }
 
+// PvP: ray against the other players' hitboxes (0.6 wide, 1.8 tall).
+// Returns the nearest hit with its distance, or null.
+function raycastRemotePlayers(ox, oy, oz, dx, dy, dz, maxT) {
+  let best = null;
+  for (const [id, r] of remoteModels) {
+    if (!r.group.visible) continue;
+    const g = r.group.position;
+    const hw = 0.32;
+    // slab method on the player AABB
+    let t0 = 0, t1 = maxT;
+    const lo = [g.x - hw, g.y, g.z - hw], hi = [g.x + hw, g.y + 1.8, g.z + hw];
+    const o = [ox, oy, oz], d = [dx, dy, dz];
+    let miss = false;
+    for (let i = 0; i < 3; i++) {
+      if (Math.abs(d[i]) < 1e-6) { if (o[i] < lo[i] || o[i] > hi[i]) { miss = true; break; } continue; }
+      let ta = (lo[i] - o[i]) / d[i], tb = (hi[i] - o[i]) / d[i];
+      if (ta > tb) { const s2 = ta; ta = tb; tb = s2; }
+      t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
+      if (t0 > t1) { miss = true; break; }
+    }
+    if (miss || t0 >= maxT) continue;
+    if (!best || t0 < best.t) best = { id, t: t0, r };
+  }
+  return best;
+}
+
 function updateRemotes(dt) {
   if (!mpSession) { if (remoteModels.size) for (const id of [...remoteModels.keys()]) removeRemote(id); return; }
   if (net.online) {
@@ -4006,6 +4059,16 @@ function updateRemotes(dt) {
     if (sig !== r.armorSig) { r.armorSig = sig; r.parts.setArmor(p.armor || [null, null, null, null]); }
     const hsig = p.held | 0;
     if (hsig !== r.heldSig) { r.heldSig = hsig; setRemoteHeld(r, hsig); }
+    // brief red flash after being hit (PvP feedback)
+    if (r.hurtT !== undefined && r.hurtT < 0.35) {
+      r.hurtT += dt;
+      const flash = r.hurtT < 0.3;
+      for (const part of [r.parts.head, r.parts.body, r.parts.armL, r.parts.armR, r.parts.legL, r.parts.legR]) {
+        if (!part || !part.material) continue;
+        if (!part.userData._baseColor) part.userData._baseColor = part.material.color.getHex();
+        part.material.color.setHex(flash ? 0xff5555 : part.userData._baseColor);
+      }
+    }
     // name tags fade out with distance so a busy server stays readable
     const tag = r.group.children.find(o => o.isSprite);
     if (tag) tag.material.opacity = far > 48 ? 0 : (far > 32 ? (48 - far) / 16 : 1);
@@ -4140,6 +4203,29 @@ if (mpSession) {
     onTime: (t) => { if (Math.abs(t - timeOfDay) > 0.004) timeOfDay = t; },
     onWeather: (mode) => setWeather(mode, 0, true),
     onAct: (id, act) => { const r = remoteModels.get(id); if (r && act === 'swing') r.swingT = 0; },
+    // PvP: somebody was hit. Me -> take damage + knockback; someone else -> show it
+    onHurt: (m) => {
+      if (m.id === net.myId) {
+        if (m.by) lastPlayerAttacker = m.by;
+        player.damage(Math.max(1, m.dmg | 0), simTime, 'attack');
+        if (!player.dead) {
+          const k = m.crit ? 9 : 6;
+          player.vel.x += (m.kx || 0) * k;
+          player.vel.z += (m.kz || 0) * k;
+          if (m.crit) player.vel.y = Math.max(player.vel.y, 4.2);
+          player.onGround = false;
+          chatMessage(`${m.by} hit you for ${m.dmg}`, '#ffb0b0');
+        }
+      } else {
+        const r = remoteModels.get(m.id);
+        if (r) {
+          const g = r.group.position;
+          particles.burst(g.x, g.y + 1.1, g.z, [0.85, 0.22, 0.22], 9, 3);
+          if (m.crit) particles.burst(g.x, g.y + 1.3, g.z, [1, 0.85, 0.25], 8, 3.5);
+          r.hurtT = 0;   // short red flash on the model
+        }
+      }
+    },
     onDrop: (m) => {
       if (!m || !ITEMS[m.id]) return;
       if (![m.x, m.y, m.z].every(Number.isFinite)) return;
@@ -4182,6 +4268,26 @@ window.__game = {
   getDaylight: () => daylight,
   forceStart: () => { forceStarted = true; started = true; overlay.classList.add('hidden'); },
   currentTarget, setSelected, useHeld, igniteTnt,
+  // what the PvP ray currently sees (used by the tests)
+  rsLastScan: () => rsLastScan(),
+  pvpProbe: (maxT = 4.5) => {
+    const eye = player.eye(), dir = player.forwardDir();
+    const h = raycastRemotePlayers(eye.x, eye.y, eye.z, dir.x, dir.y, dir.z, maxT);
+    return {
+      hit: h ? { id: h.id, t: +h.t.toFixed(2) } : null,
+      eye: [+eye.x.toFixed(2), +eye.y.toFixed(2), +eye.z.toFixed(2)],
+      dir: [+dir.x.toFixed(2), +dir.y.toFixed(2), +dir.z.toFixed(2)],
+      remotes: [...remoteModels.entries()].map(([id, r]) => ({ id, vis: r.group.visible, pos: [+r.group.position.x.toFixed(2), +r.group.position.y.toFixed(2), +r.group.position.z.toFixed(2)] })),
+      myId: net.myId, online: net.online,
+    };
+  },
+  // one real attack tick through the normal code path (used by the tests)
+  attackOnce: () => {
+    dbgLastAttack = null;
+    punchCd = -1; breakingHeld = true;
+    try { updateMining(0.016); } finally { breakingHeld = false; }
+    return dbgLastAttack || { kind: 'none', dead: player.dead, hp: player.hp, online: !!(mpSession && net.online) };
+  },
   give: (id, n = 1) => inventory.add(id, n),
   breakTarget: () => {
     const hit = currentTarget();
@@ -4192,7 +4298,7 @@ window.__game = {
     return hit;
   },
   openInventory, closeInventory, matchGrid,
-  I, ITEMS, RECIPES, B, BLOCKS,
+  I, ITEMS, RECIPES, B, BLOCKS, PALETTE_IDS, atlasCanvas, ATLAS_COLS, SMELTING,
   setCraftCells: (cells) => {
     inventory.craft = cells.slice(0, 9).map(id => (id == null ? null : { id, n: 1 }));
     while (inventory.craft.length < 9) inventory.craft.push(null);
@@ -4207,6 +4313,8 @@ window.__game = {
     else inventory.leftClick(area, idx);
   },
   suppressSave: () => { wipeSave = true; },
+  saveNow: () => { save(); return true; },
+  getSaveKey: () => SAVE_KEY,
   setGameMode: (m) => applyGameMode(m, { silent: true }),
   cycleCamera, getCamMode: () => camMode,
   chat: submitChat, net, setWeather, isMP,

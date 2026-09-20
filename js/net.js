@@ -191,6 +191,8 @@ export const net = {
   sendOp(target) { this.send({ t: 'op', target }); },
   sendTime(v) { this.send({ t: 'settime', v }); },
   sendAct(act) { this.send({ t: 'act', act }); },
+  // PvP: hit another player (the server validates range + rate and broadcasts it)
+  sendHit(id, dmg, crit) { this.send({ t: 'hit', id, dmg, crit: crit ? 1 : 0 }); },
   sendDied(text) { this.send({ t: 'died', text }); },
   sendDrop(nid, id, n, x, y, z, vx, vy, vz, dmg = 0, tag = null) {
     this.send({
@@ -286,6 +288,8 @@ export const net = {
         ev.onTime && ev.onTime(m.time);
         break;
       case 'act': ev.onAct && ev.onAct(m.id, m.act); break;
+      case 'hurt': ev.onHurt && ev.onHurt(m); break;
+      case 'died': ev.onPlayerDied && ev.onPlayerDied(m); break;
       case 'weather':
         this.weather = m.mode === 'rain' ? 'rain' : 'clear';
         ev.onWeather && ev.onWeather(this.weather);

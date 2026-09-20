@@ -4,8 +4,9 @@ name: Backup the multiplayer world
 # live world out of the running server and stores it in the "world" branch.
 # The server pulls it back at boot through --db-url (see render.yaml).
 #
-# One-time setup: repository Settings -> Secrets and variables -> Actions ->
-# Variables -> New repository variable:  APP_URL = https://your-app.onrender.com
+# Setup: none needed - it points at https://webcraft-h4g9.onrender.com by default.
+# Want another server? Settings -> Secrets and variables -> Actions -> Variables
+# -> New repository variable:  APP_URL = https://your-server
 # Runs every 20 minutes; only real changes (a new build) create a commit.
 
 on:
@@ -24,7 +25,10 @@ jobs:
   backup:
     runs-on: ubuntu-latest
     env:
-      APP_URL: ${{ vars.APP_URL }}
+      # works out of the box: the live server address is the default below.
+      # To change it later, add a repository variable APP_URL (Settings ->
+      # Secrets and variables -> Actions -> Variables) and it wins over this.
+      APP_URL: ${{ vars.APP_URL || 'https://webcraft-h4g9.onrender.com' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -34,8 +38,14 @@ jobs:
         run: |
           if [ -z "$APP_URL" ]; then echo "APP_URL variable is not set - skipping"; exit 0; fi
           mkdir -p /tmp/world
-          code=$(curl -s -o /tmp/world/db.json -w '%{http_code}' --max-time 60 "$APP_URL/export" || true)
-          echo "GET $APP_URL/export -> $code"
+          # the free plan sleeps after 15 idle minutes: wait for the cold start
+          code=""
+          for try in 1 2 3; do
+            code=$(curl -s -o /tmp/world/db.json -w '%{http_code}' --max-time 120 "$APP_URL/export" || true)
+            echo "attempt $try: GET $APP_URL/export -> $code"
+            [ "$code" = "200" ] && break
+            sleep 15
+          done
           test "$code" = "200" || { echo "server not reachable (asleep?) - keeping the previous backup"; exit 0; }
           python3 - <<'PY'
           import json

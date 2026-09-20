@@ -43,6 +43,8 @@ const MAX_DELTAS = Math.max(1000, parseInt(arg('--max-deltas', '20000'), 10) || 
 const IMPORT_TOKEN = String(arg('--token', process.env.MP_TOKEN || ''));
 // optional URL of a world snapshot to pull at boot (free hosts wipe the disk)
 const DB_URL = String(arg('--db-url', process.env.MP_DB_URL || ''));
+// player-vs-player damage: on by default, --pvp off / MP_PVP=0 disables it
+const PVP = !/^(0|off|no|false)$/i.test(String(arg('--pvp', process.env.MP_PVP || '1')));
 const MAX_MSG = 1024 * 1024;
 const MAX_BATCH = 2000;      // blocks per sets message
 const IDLE_TIMEOUT = 120000; // no frames at all for 2 min -> drop
@@ -429,6 +431,24 @@ function onMessage(p, raw) {
       // batches carrying an id are confirmed, so the client can drop them from
       // its "not yet on the server" list (edits are never silently lost)
       if (Number.isInteger(m.batch)) sendText(p.sock, JSON.stringify({ t: 'ack', batch: m.batch, n: clean.length }));
+      break;
+    }
+    case 'hit': {
+      // PvP: the attacker's client decides the damage (weapon + crit), the
+      // server only checks that the hit is plausible: right target, same
+      // dimension, out of arm's reach and not faster than the swing cooldown.
+      if (!p.hello || !PVP || limited(p, 'hit', 4, 1000)) return;
+      const target = players.get(m.id | 0);
+      if (!target || target.id === p.id || !target.hello) return;
+      if ((target.dim || 'overworld') !== (p.dim || 'overworld')) return;
+      const dx = target.pos[0] - p.pos[0], dy = target.pos[1] - p.pos[1], dz = target.pos[2] - p.pos[2];
+      if (Math.hypot(dx, dy, dz) > 8) return;          // reach
+      const dmg = Math.max(1, Math.min(30, m.dmg | 0));
+      const kl = Math.hypot(dx, dz) || 1;
+      broadcast({
+        t: 'hurt', id: target.id, by: p.name, byId: p.id, dmg,
+        crit: m.crit ? 1 : 0, kx: +(dx / kl).toFixed(3), kz: +(dz / kl).toFixed(3),
+      });
       break;
     }
     case 'settime': {

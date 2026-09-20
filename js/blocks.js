@@ -44,6 +44,29 @@ export const B = {
   PISTON: 191, STICKY_PISTON: 192, PISTON_HEAD: 193,
   DISPENSER: 194, DROPPER: 195, HOPPER: 196,
   BULB: 197, BULB_ON: 198, TARGET: 199,
+  // Building / Nether / End sets. Block ids continue at 300 so that the ids of
+  // already generated & saved worlds never shift (item ids live in 200..299).
+  DEEPSLATE: 300, COBBLED_DEEPSLATE: 301, POLISHED_DEEPSLATE: 302, DEEPSLATE_BRICK: 303,
+  CRACKED_STONE_BRICK: 304, CHISELED_DEEPSLATE: 305,
+  GRANITE: 306, POLISHED_GRANITE: 307, DIORITE: 308, POLISHED_DIORITE: 309,
+  ANDESITE: 310, POLISHED_ANDESITE: 311, TERRACOTTA: 312,
+  SMOOTH_QUARTZ: 313, QUARTZ_PILLAR: 314, CHISELED_QUARTZ: 315,
+  CUT_SANDSTONE: 316, SMOOTH_SANDSTONE: 317,
+  PRISMARINE: 318, DARK_PRISMARINE: 319, PRISMARINE_BRICK: 320,
+  SOUL_SAND: 321, BASALT: 322, POLISHED_BASALT: 323,
+  BLACKSTONE: 324, POLISHED_BLACKSTONE: 325, POLISHED_BLACKSTONE_BRICK: 326, CHISELED_BLACKSTONE: 327,
+  NETHER_WART_BLOCK: 328, SHROOMLIGHT: 329,
+  ANCIENT_DEBRIS: 330, NETHER_GOLD_ORE: 331,
+  CRIMSON_STEM: 332, CRIMSON_PLANK: 333, WARPED_STEM: 334, WARPED_PLANK: 335,
+  END_STONE_BRICK: 336, PURPUR: 337, PURPUR_PILLAR: 338, END_ROD: 339,
+  NETHER_BRICK_FENCE: 340,
+  QUARTZ_SLAB: 341, DEEPSLATE_BRICK_SLAB: 342, BLACKSTONE_SLAB: 343,
+  PURPUR_SLAB: 344, PRISMARINE_SLAB: 345,
+  QUARTZ_STAIRS: 360,      // 4 facings: 360..363
+  DEEPSLATE_BRICK_STAIRS: 364,  // 364..367
+  BLACKSTONE_STAIRS: 368,   // 368..371
+  PURPUR_STAIRS: 372,       // 372..375
+  PRISMARINE_STAIRS: 376,   // 376..379
 };
 
 export const TILE = {
@@ -90,6 +113,27 @@ export const TILE = {
   DISP_SIDE: 168, DISP_HOLE: 169, DROP_SIDE: 170, DROP_HOLE: 171,
   HOPPER_TOP: 172, HOPPER_SIDE: 173, BULB_OFF: 174, BULB_ON: 175,
   TARGET_TOP: 176, TARGET_SIDE: 177,
+  // --- added in the "more blocks" update (178..233) ---
+  DEEPSLATE: 178, COBBLED_DEEPSLATE: 179, POLISHED_DEEPSLATE: 180, DEEPSLATE_BRICK: 181,
+  CRACKED_STONE_BRICK: 182, CHISELED_DEEPSLATE: 183,
+  GRANITE: 184, POLISHED_GRANITE: 185, DIORITE: 186, POLISHED_DIORITE: 187,
+  ANDESITE: 188, POLISHED_ANDESITE: 189, TERRACOTTA: 190,
+  SMOOTH_QUARTZ: 191, QUARTZ_PILLAR_SIDE: 192, QUARTZ_PILLAR_TOP: 193, CHISELED_QUARTZ: 194,
+  CUT_SANDSTONE: 195, SMOOTH_SANDSTONE: 196,
+  PRISMARINE: 197, DARK_PRISMARINE: 198, PRISMARINE_BRICK: 199,
+  SOUL_SAND: 200, BASALT_SIDE: 201, BASALT_TOP: 202, POLISHED_BASALT: 203,
+  BLACKSTONE: 204, POLISHED_BLACKSTONE: 205, POLISHED_BLACKSTONE_BRICK: 206, CHISELED_BLACKSTONE: 207,
+  NETHER_WART_BLOCK: 208, SHROOMLIGHT: 209,
+  ANCIENT_DEBRIS_SIDE: 210, ANCIENT_DEBRIS_TOP: 211,
+  CRIMSON_STEM_SIDE: 212, CRIMSON_STEM_TOP: 213, WARPED_STEM_SIDE: 214, WARPED_STEM_TOP: 215,
+  CRIMSON_PLANK: 216, WARPED_PLANK: 217,
+  END_STONE_BRICK: 218, PURPUR: 219, PURPUR_PILLAR_SIDE: 220, PURPUR_PILLAR_TOP: 221,
+  END_ROD: 222, NETHER_GOLD_ORE: 223,
+  ICON_SLAB_QUARTZ: 224, ICON_STAIR_QUARTZ: 225,
+  ICON_SLAB_DEEPSLATE: 226, ICON_STAIR_DEEPSLATE: 227,
+  ICON_SLAB_BLACKSTONE: 228, ICON_STAIR_BLACKSTONE: 229,
+  ICON_SLAB_PURPUR: 230, ICON_STAIR_PURPUR: 231,
+  ICON_SLAB_PRISMARINE: 232, ICON_STAIR_PRISMARINE: 233,
 };
 
 export const WOOL_COLORS = [
@@ -359,6 +403,65 @@ def(B.NOTE_BLOCK, 'Note Block', TILE.NOTE_BLOCK, TILE.NOTE_BLOCK, TILE.NOTE_BLOC
 defSlab(B.SPRUCE_SLAB, 'Spruce Slab', TILE.SPRUCE_PLANK, TILE.SPRUCE_PLANK, TILE.SPRUCE_PLANK, TILE.ICON_SLAB_SPRUCE);
 defSlab(B.BIRCH_SLAB, 'Birch Slab', TILE.BIRCH_PLANK, TILE.BIRCH_PLANK, TILE.BIRCH_PLANK, TILE.ICON_SLAB_BIRCH);
 
+// --- building set ------------------------------------------------------------
+def(B.DEEPSLATE, 'Deepslate', TILE.DEEPSLATE, TILE.DEEPSLATE, TILE.DEEPSLATE);
+def(B.COBBLED_DEEPSLATE, 'Cobbled Deepslate', TILE.COBBLED_DEEPSLATE, TILE.COBBLED_DEEPSLATE, TILE.COBBLED_DEEPSLATE);
+def(B.POLISHED_DEEPSLATE, 'Polished Deepslate', TILE.POLISHED_DEEPSLATE, TILE.POLISHED_DEEPSLATE, TILE.POLISHED_DEEPSLATE);
+def(B.DEEPSLATE_BRICK, 'Deepslate Bricks', TILE.DEEPSLATE_BRICK, TILE.DEEPSLATE_BRICK, TILE.DEEPSLATE_BRICK);
+def(B.CHISELED_DEEPSLATE, 'Chiseled Deepslate', TILE.CHISELED_DEEPSLATE, TILE.CHISELED_DEEPSLATE, TILE.CHISELED_DEEPSLATE);
+def(B.CRACKED_STONE_BRICK, 'Cracked Stone Bricks', TILE.CRACKED_STONE_BRICK, TILE.CRACKED_STONE_BRICK, TILE.CRACKED_STONE_BRICK);
+def(B.GRANITE, 'Granite', TILE.GRANITE, TILE.GRANITE, TILE.GRANITE);
+def(B.POLISHED_GRANITE, 'Polished Granite', TILE.POLISHED_GRANITE, TILE.POLISHED_GRANITE, TILE.POLISHED_GRANITE);
+def(B.DIORITE, 'Diorite', TILE.DIORITE, TILE.DIORITE, TILE.DIORITE);
+def(B.POLISHED_DIORITE, 'Polished Diorite', TILE.POLISHED_DIORITE, TILE.POLISHED_DIORITE, TILE.POLISHED_DIORITE);
+def(B.ANDESITE, 'Andesite', TILE.ANDESITE, TILE.ANDESITE, TILE.ANDESITE);
+def(B.POLISHED_ANDESITE, 'Polished Andesite', TILE.POLISHED_ANDESITE, TILE.POLISHED_ANDESITE, TILE.POLISHED_ANDESITE);
+def(B.TERRACOTTA, 'Terracotta', TILE.TERRACOTTA, TILE.TERRACOTTA, TILE.TERRACOTTA);
+def(B.SMOOTH_QUARTZ, 'Smooth Quartz', TILE.SMOOTH_QUARTZ, TILE.SMOOTH_QUARTZ, TILE.SMOOTH_QUARTZ);
+def(B.QUARTZ_PILLAR, 'Quartz Pillar', TILE.QUARTZ_PILLAR_TOP, TILE.QUARTZ_PILLAR_TOP, TILE.QUARTZ_PILLAR_SIDE);
+def(B.CHISELED_QUARTZ, 'Chiseled Quartz Block', TILE.CHISELED_QUARTZ, TILE.CHISELED_QUARTZ, TILE.CHISELED_QUARTZ);
+def(B.CUT_SANDSTONE, 'Cut Sandstone', TILE.CUT_SANDSTONE, TILE.CUT_SANDSTONE, TILE.CUT_SANDSTONE);
+def(B.SMOOTH_SANDSTONE, 'Smooth Sandstone', TILE.SMOOTH_SANDSTONE, TILE.SMOOTH_SANDSTONE, TILE.SMOOTH_SANDSTONE);
+def(B.PRISMARINE, 'Prismarine', TILE.PRISMARINE, TILE.PRISMARINE, TILE.PRISMARINE);
+def(B.PRISMARINE_BRICK, 'Prismarine Bricks', TILE.PRISMARINE_BRICK, TILE.PRISMARINE_BRICK, TILE.PRISMARINE_BRICK);
+def(B.DARK_PRISMARINE, 'Dark Prismarine', TILE.DARK_PRISMARINE, TILE.DARK_PRISMARINE, TILE.DARK_PRISMARINE);
+defSlab(B.QUARTZ_SLAB, 'Quartz Slab', TILE.SMOOTH_QUARTZ, TILE.SMOOTH_QUARTZ, TILE.SMOOTH_QUARTZ, TILE.ICON_SLAB_QUARTZ);
+defSlab(B.DEEPSLATE_BRICK_SLAB, 'Deepslate Brick Slab', TILE.DEEPSLATE_BRICK, TILE.DEEPSLATE_BRICK, TILE.DEEPSLATE_BRICK, TILE.ICON_SLAB_DEEPSLATE);
+defSlab(B.BLACKSTONE_SLAB, 'Blackstone Slab', TILE.POLISHED_BLACKSTONE, TILE.POLISHED_BLACKSTONE, TILE.POLISHED_BLACKSTONE, TILE.ICON_SLAB_BLACKSTONE);
+defSlab(B.PURPUR_SLAB, 'Purpur Slab', TILE.PURPUR, TILE.PURPUR, TILE.PURPUR, TILE.ICON_SLAB_PURPUR);
+defSlab(B.PRISMARINE_SLAB, 'Prismarine Slab', TILE.PRISMARINE, TILE.PRISMARINE, TILE.PRISMARINE, TILE.ICON_SLAB_PRISMARINE);
+defStairs(B.QUARTZ_STAIRS, 'Quartz Stairs', TILE.SMOOTH_QUARTZ, TILE.SMOOTH_QUARTZ, TILE.SMOOTH_QUARTZ, TILE.ICON_STAIR_QUARTZ);
+defStairs(B.DEEPSLATE_BRICK_STAIRS, 'Deepslate Brick Stairs', TILE.DEEPSLATE_BRICK, TILE.DEEPSLATE_BRICK, TILE.DEEPSLATE_BRICK, TILE.ICON_STAIR_DEEPSLATE);
+defStairs(B.BLACKSTONE_STAIRS, 'Blackstone Stairs', TILE.POLISHED_BLACKSTONE, TILE.POLISHED_BLACKSTONE, TILE.POLISHED_BLACKSTONE, TILE.ICON_STAIR_BLACKSTONE);
+defStairs(B.PURPUR_STAIRS, 'Purpur Stairs', TILE.PURPUR, TILE.PURPUR, TILE.PURPUR, TILE.ICON_STAIR_PURPUR);
+defStairs(B.PRISMARINE_STAIRS, 'Prismarine Stairs', TILE.PRISMARINE, TILE.PRISMARINE, TILE.PRISMARINE, TILE.ICON_STAIR_PRISMARINE);
+
+// --- Nether set --------------------------------------------------------------
+def(B.SOUL_SAND, 'Soul Sand', TILE.SOUL_SAND, TILE.SOUL_SAND, TILE.SOUL_SAND);
+def(B.BASALT, 'Basalt', TILE.BASALT_TOP, TILE.BASALT_TOP, TILE.BASALT_SIDE);
+def(B.POLISHED_BASALT, 'Polished Basalt', TILE.POLISHED_BASALT, TILE.POLISHED_BASALT, TILE.POLISHED_BASALT);
+def(B.BLACKSTONE, 'Blackstone', TILE.BLACKSTONE, TILE.BLACKSTONE, TILE.BLACKSTONE);
+def(B.POLISHED_BLACKSTONE, 'Polished Blackstone', TILE.POLISHED_BLACKSTONE, TILE.POLISHED_BLACKSTONE, TILE.POLISHED_BLACKSTONE);
+def(B.POLISHED_BLACKSTONE_BRICK, 'Polished Blackstone Bricks', TILE.POLISHED_BLACKSTONE_BRICK, TILE.POLISHED_BLACKSTONE_BRICK, TILE.POLISHED_BLACKSTONE_BRICK);
+def(B.CHISELED_BLACKSTONE, 'Chiseled Polished Blackstone', TILE.CHISELED_BLACKSTONE, TILE.CHISELED_BLACKSTONE, TILE.CHISELED_BLACKSTONE);
+def(B.NETHER_WART_BLOCK, 'Nether Wart Block', TILE.NETHER_WART_BLOCK, TILE.NETHER_WART_BLOCK, TILE.NETHER_WART_BLOCK);
+def(B.SHROOMLIGHT, 'Shroomlight', TILE.SHROOMLIGHT, TILE.SHROOMLIGHT, TILE.SHROOMLIGHT, { glow: true });
+def(B.ANCIENT_DEBRIS, 'Ancient Debris', TILE.ANCIENT_DEBRIS_TOP, TILE.ANCIENT_DEBRIS_TOP, TILE.ANCIENT_DEBRIS_SIDE);
+def(B.NETHER_GOLD_ORE, 'Nether Gold Ore', TILE.NETHER_GOLD_ORE, TILE.NETHER_GOLD_ORE, TILE.NETHER_GOLD_ORE);
+def(B.CRIMSON_STEM, 'Crimson Stem', TILE.CRIMSON_STEM_TOP, TILE.CRIMSON_STEM_TOP, TILE.CRIMSON_STEM_SIDE);
+def(B.CRIMSON_PLANK, 'Crimson Planks', TILE.CRIMSON_PLANK, TILE.CRIMSON_PLANK, TILE.CRIMSON_PLANK);
+def(B.WARPED_STEM, 'Warped Stem', TILE.WARPED_STEM_TOP, TILE.WARPED_STEM_TOP, TILE.WARPED_STEM_SIDE);
+def(B.WARPED_PLANK, 'Warped Planks', TILE.WARPED_PLANK, TILE.WARPED_PLANK, TILE.WARPED_PLANK);
+def(B.NETHER_BRICK_FENCE, 'Nether Brick Fence', TILE.NETHER_BRICK, TILE.NETHER_BRICK, TILE.NETHER_BRICK,
+  { shape: 'fence', opaque: false });
+
+// --- End set -----------------------------------------------------------------
+def(B.END_STONE_BRICK, 'End Stone Bricks', TILE.END_STONE_BRICK, TILE.END_STONE_BRICK, TILE.END_STONE_BRICK);
+def(B.PURPUR, 'Purpur Block', TILE.PURPUR, TILE.PURPUR, TILE.PURPUR);
+def(B.PURPUR_PILLAR, 'Purpur Pillar', TILE.PURPUR_PILLAR_TOP, TILE.PURPUR_PILLAR_TOP, TILE.PURPUR_PILLAR_SIDE);
+def(B.END_ROD, 'End Rod', TILE.END_ROD, TILE.END_ROD, TILE.END_ROD,
+  { shape: 'cross', solid: false, opaque: false, glow: true, needSupport: true });
+
 export const isSolid = (id) => !!(BLOCKS[id] && BLOCKS[id].solid);
 export const isOpaque = (id) => !!(BLOCKS[id] && BLOCKS[id].opaque);
 
@@ -539,7 +642,7 @@ export function emitCross(buf, x, y, z, tile) {
 
 // ---------------------------------------------------------------------------
 // Texture atlas: 16x8 grid of 16px tiles -> 256x128 canvas.
-const T = 16, COLS = 16, ROWS = 12;
+const T = 16, COLS = 16, ROWS = 16;   // 256 tiles: room for the building/Nether/End sets
 export const ATLAS_COLS = COLS;
 
 const ORE_SPOTS = {
@@ -551,6 +654,7 @@ const ORE_SPOTS = {
   [TILE.LAPIS_ORE]: { color: [40, 78, 182], spots: [[5, 4], [11, 5], [4, 11], [10, 11], [13, 13]] },
   [TILE.EMERALD_ORE]: { color: [62, 210, 108], spots: [[5, 5], [10, 8], [6, 12]] },
   [TILE.QUARTZ_ORE]: { color: [234, 228, 220], spots: [[4, 4], [11, 6], [6, 11], [12, 12]], base: TILE.NETHERRACK },
+  [TILE.NETHER_GOLD_ORE]: { color: [250, 202, 74], spots: [[4, 4], [11, 6], [7, 11], [13, 12]], base: TILE.NETHERRACK },
 };
 
 // TNT label rows (y 6..9)
@@ -1302,6 +1406,181 @@ export function buildAtlas() {
     if (h < 0.3) return [...jitter([150, 110, 200], 12), 255];
     return [...jitter([110, 78, 160], 10), 255];
   };
+
+  // ---- textures for the building / Nether / End sets ----
+  const brickP2 = (mortar, face, seed, h = 4, w = 8) => (x, y) => {
+    const row = (y / h) | 0;
+    const off = row % 2 ? h : 0;
+    if (y % h === 0 || (x + off) % w === 0) return [...jitter(mortar, 6), 255];
+    return [...jitter(face, 6), 255];
+  };
+  const stoneP2 = (tones, seed) => cluster(tones, seed);
+  const stemTopP2 = (rim, a, b) => (x, y) => {
+    const d = Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5));
+    if (d > 6.5) return [...jitter(rim, 6), 255];
+    return [...jitter(Math.floor(d) % 2 === 0 ? a : b, 6), 255];
+  };
+  painters[TILE.DEEPSLATE] = stoneP2([[100, 100, 104], [88, 88, 92], [112, 112, 116], [78, 78, 82]], 31);
+  painters[TILE.COBBLED_DEEPSLATE] = (x, y) => {
+    const lx = x & 3, ly = y & 3;
+    if (lx === 0 || ly === 0) return [...jitter([50, 50, 54], 6), 255];
+    const v = (hash2(x >> 2, y >> 2, 33) - 0.5) * 26;
+    const hi = (lx === 1 && ly === 1) ? 12 : 0;
+    const c = jitter([94, 94, 98], 5);
+    return [c[0] + v + hi, c[1] + v + hi, c[2] + v + hi, 255];
+  };
+  painters[TILE.POLISHED_DEEPSLATE] = stoneP2([[86, 86, 90], [80, 80, 84], [93, 93, 97]], 37);
+  painters[TILE.DEEPSLATE_BRICK] = brickP2([58, 58, 62], [98, 98, 102], 41);
+  painters[TILE.CRACKED_STONE_BRICK] = (x, y) => {
+    if (hash2(x * 3, y * 5, 43) < 0.13) return [...jitter([62, 62, 60], 8), 255];
+    return painters[TILE.STONE_BRICK](x, y);
+  };
+  painters[TILE.CHISELED_DEEPSLATE] = (x, y) => {
+    if (x === 0 || y === 0 || x === 15 || y === 15) return [...jitter([56, 56, 60], 6), 255];
+    const d = Math.hypot(x - 7.5, y - 7.5);
+    if (d > 6.4) return [...jitter([104, 104, 108], 6), 255];
+    if (d > 3.2) return [...jitter([76, 76, 80], 6), 255];
+    return [...jitter([120, 120, 124], 6), 255];
+  };
+  painters[TILE.GRANITE] = stoneP2([[168, 118, 104], [152, 104, 92], [180, 130, 116]], 47);
+  painters[TILE.POLISHED_GRANITE] = stoneP2([[188, 134, 118], [172, 120, 106], [200, 148, 132]], 51);
+  painters[TILE.DIORITE] = (x, y) => (hash2(x, y, 53) < 0.24
+    ? [...jitter([148, 148, 152], 7), 255] : [...jitter([228, 228, 230], 6), 255]);
+  painters[TILE.POLISHED_DIORITE] = stoneP2([[234, 234, 236], [218, 218, 220], [245, 245, 247]], 57);
+  painters[TILE.ANDESITE] = (x, y) => (hash2(x * 2 + 1, y * 2 + 3, 61) < 0.26
+    ? [...jitter([120, 122, 124], 6), 255] : [...jitter([152, 154, 156], 6), 255]);
+  painters[TILE.POLISHED_ANDESITE] = stoneP2([[168, 170, 172], [156, 158, 160], [181, 183, 185]], 67);
+  painters[TILE.TERRACOTTA] = (x, y) => (hash2(x, y, 71) < 0.14
+    ? [...jitter([152, 88, 60], 7), 255] : [...jitter([174, 96, 66], 7), 255]);
+  painters[TILE.SMOOTH_QUARTZ] = stoneP2([[238, 234, 226], [228, 224, 216], [246, 242, 234]], 73);
+  painters[TILE.QUARTZ_PILLAR_SIDE] = (x, y) => {
+    if (y < 2 || y > 13) return [...jitter([234, 230, 222], 5), 255];
+    if (x >= 5 && x <= 10) return [...jitter([249, 247, 242], 6), 255];
+    return [...jitter([226, 222, 214], 6), 255];
+  };
+  painters[TILE.QUARTZ_PILLAR_TOP] = (x, y) => {
+    const d = Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5));
+    if (d > 6.5) return [...jitter([228, 224, 216], 5), 255];
+    if (d > 3.5) return [...jitter([242, 238, 231], 5), 255];
+    return [...jitter([251, 249, 245], 5), 255];
+  };
+  painters[TILE.CHISELED_QUARTZ] = (x, y) => {
+    if (x === 0 || y === 0 || x === 15 || y === 15) return [...jitter([220, 216, 208], 5), 255];
+    const d = Math.hypot(x - 7.5, y - 7.5);
+    if (d < 2.6) return [...jitter([246, 242, 235], 5), 255];
+    if (d < 5.2) return [...jitter([232, 228, 221], 5), 255];
+    return [...jitter([248, 245, 240], 5), 255];
+  };
+  painters[TILE.CUT_SANDSTONE] = (x, y) => {
+    if (y % 8 === 0 || x % 8 === 0) return [...jitter([192, 178, 142], 6), 255];
+    if (y % 8 === 1) return [...jitter([224, 210, 172], 6), 255];
+    return [...jitter([214, 200, 162], 6), 255];
+  };
+  painters[TILE.SMOOTH_SANDSTONE] = stoneP2([[226, 213, 175], [216, 203, 166], [235, 222, 185]], 79);
+  painters[TILE.PRISMARINE] = (x, y) => (hash2(x * 3 + 2, y * 3 + 7, 83) < 0.2
+    ? [...jitter([92, 168, 158], 7), 255] : [...jitter([116, 190, 178], 7), 255]);
+  painters[TILE.DARK_PRISMARINE] = (x, y) => (hash2(x * 5 + 1, y * 5 + 4, 89) < 0.28
+    ? [...jitter([42, 92, 84], 7), 255] : [...jitter([58, 116, 106], 7), 255]);
+  painters[TILE.PRISMARINE_BRICK] = brickP2([72, 140, 130], [110, 184, 172], 97, 4, 8);
+  painters[TILE.SOUL_SAND] = (x, y) => {
+    const h = hash2(x * 2 + 5, y * 2 + 1, 101);
+    if (h < 0.16) return [...jitter([92, 74, 60], 8), 255];
+    if (h < 0.28) return [...jitter([38, 28, 24], 8), 255];
+    return [...jitter([64, 52, 44], 8), 255];
+  };
+  painters[TILE.BASALT_SIDE] = (x, y) => {
+    if (x % 4 === 0) return [...jitter([56, 56, 62], 7), 255];
+    if (hash2(x, y, 103) < 0.12) return [...jitter([72, 72, 78], 6), 255];
+    return [...jitter([92, 92, 98], 7), 255];
+  };
+  painters[TILE.BASALT_TOP] = (x, y) => {
+    const d = Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5));
+    if (d > 6.5) return [...jitter([64, 64, 70], 6), 255];
+    if ((x + y) % 7 === 0) return [...jitter([70, 70, 76], 6), 255];
+    return [...jitter([98, 98, 104], 7), 255];
+  };
+  painters[TILE.POLISHED_BASALT] = (x, y) => {
+    if (y < 3 || y > 12) return [...jitter([62, 62, 68], 6), 255];
+    if (x >= 6 && x <= 9) return [...jitter([112, 112, 120], 6), 255];
+    return [...jitter([86, 86, 92], 6), 255];
+  };
+  painters[TILE.BLACKSTONE] = (x, y) => (hash2(x * 4 + 3, y * 4 + 2, 107) < 0.22
+    ? [...jitter([26, 22, 26], 7), 255] : [...jitter([46, 40, 44], 7), 255]);
+  painters[TILE.POLISHED_BLACKSTONE] = stoneP2([[54, 48, 52], [44, 38, 42], [64, 58, 62]], 109);
+  painters[TILE.POLISHED_BLACKSTONE_BRICK] = brickP2([24, 20, 24], [56, 50, 54], 113);
+  painters[TILE.CHISELED_BLACKSTONE] = (x, y) => {
+    if (x === 0 || y === 0 || x === 15 || y === 15) return [...jitter([26, 22, 26], 6), 255];
+    const d = Math.hypot(x - 7.5, y - 7.5);
+    if (d < 3) return [...jitter([72, 66, 70], 6), 255];
+    if (d < 6) return [...jitter([44, 38, 42], 6), 255];
+    return [...jitter([60, 54, 58], 6), 255];
+  };
+  painters[TILE.NETHER_WART_BLOCK] = (x, y) => {
+    const h = hash2(x * 3 + 4, y * 3 + 9, 127);
+    if (h < 0.28) return [...jitter([108, 16, 32], 8), 255];
+    if (h < 0.55) return [...jitter([140, 26, 44], 8), 255];
+    return [...jitter([120, 20, 36], 8), 255];
+  };
+  painters[TILE.SHROOMLIGHT] = (x, y) => {
+    const h = hash2(x, y, 131);
+    if (h < 0.22) return [...jitter([255, 196, 96], 10), 255];
+    if (h < 0.5) return [...jitter([250, 156, 62], 10), 255];
+    return [...jitter([255, 226, 150], 9), 255];
+  };
+  painters[TILE.ANCIENT_DEBRIS_SIDE] = (x, y) => {
+    const h = hash2(x * 3 + 1, y * 3 + 8, 137);
+    if (h < 0.12) return [...jitter([150, 116, 80], 8), 255];
+    if (h < 0.32) return [...jitter([62, 46, 32], 9), 255];
+    return [...jitter([84, 64, 46], 9), 255];
+  };
+  painters[TILE.ANCIENT_DEBRIS_TOP] = (x, y) => {
+    const d = Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5));
+    if (d > 6) return [...jitter([68, 50, 35], 7), 255];
+    const h = hash2(x * 5 + 2, y * 5 + 6, 139);
+    if (h < 0.22) return [...jitter([132, 100, 70], 8), 255];
+    return [...jitter([92, 70, 50], 8), 255];
+  };
+  painters[TILE.CRIMSON_STEM_SIDE] = barkP([[122, 60, 74], [108, 50, 64], [132, 70, 84]], [72, 34, 44], 149);
+  painters[TILE.CRIMSON_STEM_TOP] = stemTopP2([108, 52, 66], [150, 86, 100], [126, 66, 80]);
+  painters[TILE.WARPED_STEM_SIDE] = barkP([[60, 122, 120], [50, 106, 106], [72, 134, 132]], [34, 76, 76], 151);
+  painters[TILE.WARPED_STEM_TOP] = stemTopP2([52, 108, 106], [96, 168, 164], [70, 132, 130]);
+  painters[TILE.CRIMSON_PLANK] = plankP([141, 88, 104], [94, 56, 68]);
+  painters[TILE.WARPED_PLANK] = plankP([62, 128, 126], [38, 88, 90]);
+  painters[TILE.END_STONE_BRICK] = brickP2([176, 186, 130], [216, 226, 170], 157);
+  painters[TILE.PURPUR] = (x, y) => {
+    const h = hash2(x >> 1, y >> 1, 163);
+    if (h < 0.3) return [...jitter([150, 86, 164], 8), 255];
+    return [...jitter([182, 112, 196], 8), 255];
+  };
+  painters[TILE.PURPUR_PILLAR_SIDE] = (x, y) => {
+    if (y % 4 === 0) return [...jitter([136, 76, 150], 6), 255];
+    if (x >= 5 && x <= 10) return [...jitter([178, 108, 192], 7), 255];
+    return [...jitter([198, 128, 210], 7), 255];
+  };
+  painters[TILE.PURPUR_PILLAR_TOP] = (x, y) => {
+    const d = Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5));
+    if (d > 6.5) return [...jitter([166, 98, 180], 6), 255];
+    if (d > 3) return [...jitter([188, 118, 202], 6), 255];
+    return [...jitter([208, 142, 220], 7), 255];
+  };
+  painters[TILE.END_ROD] = (x, y) => {
+    if (x >= 6 && x <= 9 && y >= 2 && y <= 13) {
+      if (x === 6 || x === 9) return [...jitter([214, 220, 224], 6), 255];
+      return [...jitter([246, 250, 252], 5), 255];
+    }
+    if (y >= 6 && y <= 8 && x >= 4 && x <= 11) return [...jitter([226, 232, 236], 6), 255];
+    return [0, 0, 0, 0];
+  };
+  painters[TILE.ICON_SLAB_QUARTZ] = half(painters[TILE.SMOOTH_QUARTZ]);
+  painters[TILE.ICON_STAIR_QUARTZ] = step(painters[TILE.SMOOTH_QUARTZ]);
+  painters[TILE.ICON_SLAB_DEEPSLATE] = half(painters[TILE.DEEPSLATE_BRICK]);
+  painters[TILE.ICON_STAIR_DEEPSLATE] = step(painters[TILE.DEEPSLATE_BRICK]);
+  painters[TILE.ICON_SLAB_BLACKSTONE] = half(painters[TILE.POLISHED_BLACKSTONE]);
+  painters[TILE.ICON_STAIR_BLACKSTONE] = step(painters[TILE.POLISHED_BLACKSTONE]);
+  painters[TILE.ICON_SLAB_PURPUR] = half(painters[TILE.PURPUR]);
+  painters[TILE.ICON_STAIR_PURPUR] = step(painters[TILE.PURPUR]);
+  painters[TILE.ICON_SLAB_PRISMARINE] = half(painters[TILE.PRISMARINE]);
+  painters[TILE.ICON_STAIR_PRISMARINE] = step(painters[TILE.PRISMARINE]);
 
   for (const [tileStr, painter] of Object.entries(painters)) {
     const tile = +tileStr;

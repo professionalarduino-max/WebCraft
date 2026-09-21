@@ -368,11 +368,14 @@ export class Player {
     return true;
   }
 
-  damage(n, time, type = 'generic') {
+  damage(n, time, type = 'generic', fromNet = false) {
     if (this.creative) return; // invulnerable
-    if (this.invulnerable) return; // spawn safe zone
     if (this.dead || n <= 0) return;
-    if (time - this.lastDamage < 0.5) return; // brief invulnerability
+    if (this.invulnerable) return; // spawn safe zone: nobody can hurt you there
+    // The brief invulnerability window is a local-combat rule (mobs, fall, fire).
+    // A hit confirmed by the SERVER always lands — otherwise a stuttering or
+    // background tab silently ate half of the damage other players dealt.
+    if (!fromNet && time - this.lastDamage < 0.5) return; // brief invulnerability
     this.lastDmg = type;
     // armor reduces combat/burn damage (4% per point, capped 80%)
     if (type === 'attack' || type === 'lava' || type === 'fire') {

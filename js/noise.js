@@ -23,6 +23,18 @@ export function hash3(x, y, z, seed) {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 
+// Hot-path helpers: module-level (no per-call closure allocation, no property
+// lookups) so chunk generation stays fast. The maths is exactly the same as
+// before — only the bookkeeping around it is cheaper.
+const fadeAt = (t) => t * t * t * (t * (t * 6 - 15) + 10);
+const lerpTo = (t, a, b) => a + t * (b - a);
+function gradAt(hash, x, y, z) {
+  const h = hash & 15;
+  const u = h < 8 ? x : y;
+  const v = h < 4 ? y : (h === 12 || h === 14 ? x : z);
+  return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
+}
+
 export class Perlin {
   constructor(seed = 0) {
     const rand = mulberry32(seed);
@@ -36,33 +48,42 @@ export class Perlin {
     for (let i = 0; i < 512; i++) this.p[i] = perm[i & 255];
   }
 
-  fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
+  fade(t) { return fadeAt(t); }
 
-  grad(hash, x, y, z) {
-    const h = hash & 15;
-    const u = h < 8 ? x : y;
-    const v = h < 4 ? y : (h === 12 || h === 14 ? x : z);
-    return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
-  }
+  grad(hash, x, y, z) { return gradAt(hash, x, y, z); }
 
   noise3(x, y, z) {
     const p = this.p;
-    const X = Math.floor(x) & 255, Y = Math.floor(y) & 255, Z = Math.floor(z) & 255;
-    x -= Math.floor(x); y -= Math.floor(y); z -= Math.floor(z);
-    const u = this.fade(x), v = this.fade(y), w = this.fade(z);
+    const xf = Math.floor(x), yf = Math.floor(y), zf = Math.floor(z);
+    const X = xf & 255, Y = yf & 255, Z = zf & 255;
+    x -= xf; y -= yf; z -= zf;
+    const u = fadeAt(x), v = fadeAt(y), w = fadeAt(z);
     const A = p[X] + Y, AA = p[A] + Z, AB = p[A + 1] + Z;
     const B = p[X + 1] + Y, BA = p[B] + Z, BB = p[B + 1] + Z;
-    const lerp = (t, a, b) => a + t * (b - a);
-    return lerp(w,
-      lerp(v,
-        lerp(u, this.grad(p[AA], x, y, z), this.grad(p[BA], x - 1, y, z)),
-        lerp(u, this.grad(p[AB], x, y - 1, z), this.grad(p[BB], x - 1, y - 1, z))),
-      lerp(v,
-        lerp(u, this.grad(p[AA + 1], x, y, z - 1), this.grad(p[BA + 1], x - 1, y, z - 1)),
-        lerp(u, this.grad(p[AB + 1], x, y - 1, z - 1), this.grad(p[BB + 1], x - 1, y - 1, z - 1))));
+    return lerpTo(w,
+      lerpTo(v,
+        lerpTo(u, gradAt(p[AA], x, y, z), gradAt(p[BA], x - 1, y, z)),
+        lerpTo(u, gradAt(p[AB], x, y - 1, z), gradAt(p[BB], x - 1, y - 1, z))),
+      lerpTo(v,
+        lerpTo(u, gradAt(p[AA + 1], x, y, z - 1), gradAt(p[BA + 1], x - 1, y, z - 1)),
+        lerpTo(u, gradAt(p[AB + 1], x, y - 1, z - 1), gradAt(p[BB + 1], x - 1, y - 1, z - 1))));
   }
 
-  noise2(x, y) { return this.noise3(x, y, 0); }
+  // noise3(x, y, 0): the z-weight is exactly 0 there, so the far half of the
+  // trilinear blend cannot contribute anything and is skipped (2D terrain and
+  // every fbm2 call in the world generator run through here).
+  noise2(x, y) {
+    const p = this.p;
+    const xf = Math.floor(x), yf = Math.floor(y);
+    const X = xf & 255, Y = yf & 255, Z = 0;
+    x -= xf; y -= yf;
+    const u = fadeAt(x), v = fadeAt(y);
+    const A = p[X] + Y, AA = p[A] + Z, AB = p[A + 1] + Z;
+    const B = p[X + 1] + Y, BA = p[B] + Z, BB = p[B + 1] + Z;
+    return lerpTo(v,
+      lerpTo(u, gradAt(p[AA], x, y, 0), gradAt(p[BA], x - 1, y, 0)),
+      lerpTo(u, gradAt(p[AB], x, y - 1, 0), gradAt(p[BB], x - 1, y - 1, 0)));
+  }
 }
 
 export function fbm2(noise, x, y, octaves = 4, lacunarity = 2, gain = 0.5) {

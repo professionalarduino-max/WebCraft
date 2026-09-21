@@ -1,30 +1,28 @@
 WebCraft - Minecraft in your browser (fan remake)
 =================================================
 
-WHAT'S NEW (latest update)
---------------------------
-* PvP: you can now hit other players. Left-click a player within 3 blocks:
-  they take weapon damage (critical hit while falling), get knocked back and
-  see "*<name>* hit you for N" in chat. Deaths announce "X was slain by Y".
-  Want a peaceful server? Start it with:  node server/mp-server.js --pvp off
-* Redstone and pistons are fixed: levers, buttons, plates, torches, repeaters,
-  comparators, observers, pistons (incl. sticky), TNT, lamps, note blocks and
-  doors all switch on AND off again (before, most devices never reacted).
-* About 50 new blocks:
-  - building: deepslate set, cracked stone bricks, granite / diorite / andesite
-    (rough + polished), terracotta, smooth & chiseled quartz, quartz pillar,
-    cut & smooth sandstone, prismarine (normal / bricks / dark),
-    plus slabs and stairs for quartz, deepslate bricks, blackstone,
-    purpur and prismarine;
-  - Nether: soul sand, basalt, polished basalt, blackstone + polished /
-    polished bricks / chiseled, nether wart block, shroomlight, ancient debris,
-    nether gold ore, crimson & warped stems and planks, nether brick fence;
-  - End: end stone bricks, purpur, purpur pillars, end rods.
-  Every new block is craftable (check the recipe list in the inventory) or
-  smeltable, and all of them are in the creative palette.
-* The Nether now has blackstone / soul sand / basalt biomes, magma crusts,
-  basalt stalactites, shroomlight and ancient debris.
-* The End island now has ruined purpur towers with glowing end rods.
+WHAT'S NEW (latest update: light and darkness)
+----------------------------------------------
+* TORCHES AND DARKNESS WORK NOW. The game used to have no lighting at all: a
+  torch was just a bright picture, a cave looked like the surface and night was
+  one grey filter over everything. Every block now carries light and the world
+  is shaded by it:
+  - dig a mine and it gets darker the deeper you go; a roof really is a shadow
+    and a shaft you dig lets daylight down to the bottom;
+  - a torch lights a 13-block room (level 14), glowstone/lanterns 15, a redstone
+    torch 7, lava 15, magma 3; light does not go through stone, and water and
+    leaves soak it up;
+  - a torch-lit room looks the same at midnight as at noon, because torchlight
+    is drawn separately from sunlight;
+  - night is dark blue moonlight, day is bright; pitch-black caves still show a
+    faint outline so you are never looking at a pure black screen.
+* Type /light while looking at a block to see its light level (block / sky).
+* Loading a big world (a friend's city, or the world snapshot when you join) is
+  lit in one pass, so joining does not hitch any more.
+
+Previous updates: world safety / anti-grief / co-op (undo, rollback, claims,
+locks, bans, homes, tpa, teams, stats), PvP combat, redstone and piston fixes,
+~50 new building / Nether / End blocks.
 
 WHAT THIS IS
 ------------
@@ -166,6 +164,18 @@ MULTIPLAYER COMMANDS
   /spawn              teleport back to spawn
   /kick <player>      (operator) disconnect a player
   /op <player>        (operator) grant operator rights
+  /undo [seconds]     undo your own last 10 minutes of building
+  /rollback <minutes> (operator) rewind the whole world by N minutes
+  /restore            (operator) reload the last world snapshot
+  /claim /unclaim /claims        protect the land around you
+  /lock               lock the block you are looking at (chest, door, furnace)
+  /ban /unban /bans   (operator) ban list
+  /sethome /home /homes /delhome homes (5 per player)
+  /tpa /tpaccept /tpdeny /back   polite teleports, and back to where you died
+  /team /tc           teams with friendly fire off + team chat
+  /stat /top          scoreboard: kills, deaths, placed, broken
+  /sleep /wake        show in the Tab list who is sleeping (beds skip the night)
+  /help               the full command list with these groups
 
 Connection health:
   - If the server or your Wi-Fi blinks, the game reconnects automatically and

@@ -146,6 +146,8 @@ const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerH
 camera.rotation.order = 'YXZ';
 
 const ambient = new THREE.AmbientLight(0xffffff, 0.7);
+const AMB_DAY = new THREE.Color(0xffffff);
+const AMB_NIGHT = new THREE.Color(0x9fb4e6);   // cool moonlight
 scene.add(ambient);
 const sun = new THREE.DirectionalLight(0xffffff, 1.0);
 scene.add(sun);
@@ -222,7 +224,10 @@ atlasTex.colorSpace = THREE.SRGBColorSpace;
 
 const materials = {
   opaque: new THREE.MeshLambertMaterial({ map: atlasTex, vertexColors: true, alphaTest: 0.5 }),
-  water: new THREE.MeshLambertMaterial({ map: atlasTex, transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide }),
+  // faces lit by the player (torches, lamps, lava): drawn unlit, so the light
+  // they give off stays exactly as bright at midnight as at noon
+  lit: new THREE.MeshBasicMaterial({ map: atlasTex, vertexColors: true, alphaTest: 0.5 }),
+  water: new THREE.MeshLambertMaterial({ map: atlasTex, vertexColors: true, transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide }),
   lava: new THREE.MeshBasicMaterial({ map: atlasTex, alphaTest: 0.5 }), // unlit: glows in the dark (also torches/glowstone)
 };
 const avgColors = computeAvgColors(atlasCanvas);
@@ -576,6 +581,7 @@ function buildPortalFrame(x, y, z) {
       for (const dz of [-1, 1]) {
         const b = world.getBlock(x + fx, y + fy, z + dz);
         if (b !== B.AIR && b !== B.PORTAL) world.setBlock(x + fx, y + fy, z + dz, B.AIR);
+        world.lightBurst(10);
       }
 }
 
@@ -1423,9 +1429,15 @@ function scatterInventory() {
 }
 
 let lastPlayerAttacker = null;   // set when another player lands the killing-blow-ish hit
+let lockedSet = new Map();       // "dim:x,y,z" -> owner: blocks locked by players
+let myTeam = null;               // {name, color} when the server put us in a team
+let sleepUI = { names: [], n: 0, total: 0 };  // who is sleeping right now
+let lastDeath = null;            // {dim,x,y,z} for /back
 let dbgLastAttack = null;        // diagnostics for the tests: what the last swing hit
 
 player.onDeath = () => {
+  lastDeath = { dim, x: player.pos.x, y: player.pos.y, z: player.pos.z };
+  if (mpSession && net.online) net.sendSleep(true);   // dying wakes you up
   {
     const nm = (mpSession && net.online) ? net.name : 'You';
     const msgs = { fall: 'hit the ground too hard', lava: 'tried to swim in lava', fire: 'burned to death', void: 'fell out of the world', starve: 'starved to death', drown: 'drowned', attack: 'was slain', arrow: 'was shot', suicide: 'took the easy way out', generic: 'died' };
@@ -2473,6 +2485,7 @@ function finishBreak(hit, info) {
   player.exhaustion += 0.005;
   // ice melts back into water below sea level
   world.setBlock(hit.x, hit.y, hit.z, (hit.id === B.ICE && hit.y <= SEA) ? B.WATER : B.AIR);
+  world.lightBurst(10);   // a broken lamp/glowstone must go dark immediately
   if (dim === 'overworld' && world.gen === 'oneblock' && hit.x === 0 && hit.y === 63 && hit.z === 0) {
     const before = oneblockState(oneblockPhase);
     if (!isCreative()) oneblockPhase++;
@@ -2683,11 +2696,27 @@ function liquidTarget() {
 
 const notePitches = new Map(); // note block pitch memory (per position)
 
+// a block locked by another player cannot be opened, toggled or used
+function lockBlockedBy(hit) {
+  if (!mpSession || !hit || !lockedSet.size) return null;
+  const owner = lockedSet.get(`${dim}:${hit.x},${hit.y},${hit.z}`);
+  if (!owner) return null;
+  if (owner.toLowerCase() === net.name.toLowerCase()) return null;   // mine
+  if (net.isOp()) return null;                                       // operators may help
+  return owner;
+}
+
 function useHeld() {
   if (player.dead || invOpen) return;
   const hit = currentTarget();
   // interacting with a crafting table / furnace takes precedence
   if (hit && hit.t < 5) {
+    const lockOwner = lockBlockedBy(hit);
+    if (lockOwner) {
+      placingHeld = false;
+      toast(`\u{1F512} ${lockOwner} locked this block`, 2);
+      return;
+    }
     if (hit.id === B.CRAFTING_TABLE) { placingHeld = false; openInventory('table'); return; }
     if (hit.id === B.FURNACE) {
       placingHeld = false;
@@ -2738,6 +2767,7 @@ function useHeld() {
       if (dim !== 'overworld') { toast('You can only sleep in the overworld'); return; }
       player.spawn = { x: hit.x + 0.5, y: hit.y + 1.02, z: hit.z + 0.5 };
       if (daylight < 0.3) {
+        if (mpSession && net.online) net.sendSleep(false);  // night ends when everyone sleeps
         setTimeOfDay(0.02); // dawn — and everyone else sees the sunrise too
         toast('You sleep through the night… spawn point set', 2.5);
         sfx.portal();
@@ -2888,6 +2918,7 @@ function useHeld() {
       world._rsData.set(px + ',' + py + ',' + pz, faceData); // before setBlock so MP picks up `f`
     }
     world.setBlock(px, py, pz, placeId);
+    world.lightBurst(10);   // a torch lights its corner the moment it is placed
     if (id === B.SHULKER_BOX && heldTag && Array.isArray(heldTag.slots)) {
       const [st] = shulkers.get(dimPrefix() + chests.key(px, py, pz), true);
       st.slots = heldTag.slots.map(decSlot).concat(new Array(27).fill(null)).slice(0, 27);
@@ -3369,8 +3400,11 @@ function updateDayNight(dt) {
   if (weatherMode === 'rain') daylight *= 0.45;
   const dl = daylight * daylight * (3 - 2 * daylight); // smoothstep
 
-  ambient.intensity = 0.35 + 0.5 * dl;
-  sun.intensity = 0.15 + 1.0 * dl;
+  // night: dim blue moonlight; day: bright and warm. The gap between the two
+  // is what makes torches look like torches after sunset.
+  ambient.intensity = 0.34 + 0.48 * dl;
+  ambient.color.copy(AMB_NIGHT).lerp(AMB_DAY, dl);
+  sun.intensity = 0.12 + 1.15 * dl;
 
   skyColor.copy(skyNight).lerp(skyDay, dl);
   const sunsetW = Math.max(0, 1 - Math.abs(sinA) * 4.5) * dl * 0.8;
@@ -3742,7 +3776,55 @@ function spawnTick(dt) {
   if (inside && !wasInSpawn) toast('\u{1F3E0} Спавн — безопасная зона. Здесь ты бессмертен!', 2.5);
   wasInSpawn = inside;
 }
-const remoteModels = new Map(); // id -> {group, parts, walkPhase, swingT, armorSig}
+const remoteModels = new Map();
+let mpWorldEvents = null;   // the multiplayer event handlers (used by tests too)
+  // ---- community overlays: claims (land) and locks ----------------------
+const claimGroup = new THREE.Group();
+claimGroup.name = 'claims';
+scene.add(claimGroup);
+let myCid = null;
+try { myCid = localStorage.getItem('webcraft_cid') || null; } catch (e) {}
+let claimsList = [];
+const lockMap = new Map();   // "dim:x,y,z" -> owner name
+
+function rebuildClaims() {
+  for (const ch of [...claimGroup.children]) {
+    claimGroup.remove(ch);
+    ch.geometry.dispose();
+    ch.material.dispose();
+    if (ch.userData.edges) { ch.userData.edges.geometry.dispose(); ch.userData.edges.material.dispose(); }
+  }
+  for (const c of claimsList) {
+    const mine = !!myCid && c.cid === myCid;
+    const dim2 = c.dim === 'nether' ? worldNether : c.dim === 'end' ? worldEnd : worldOver;
+    const w = Math.max(1, c.x1 - c.x0 + 1), h = Math.max(1, c.y1 - c.y0 + 1), d = Math.max(1, c.z1 - c.z0 + 1);
+    const geo = new THREE.BoxGeometry(w, h, d);
+    const col = mine ? 0x54d67a : 0xffb347;
+    const mat = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: mine ? 0.10 : 0.07, depthWrite: false });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(c.x0 + w / 2, c.y0 + h / 2, c.z0 + d / 2);
+    const eg = new THREE.EdgesGeometry(geo);
+    const edges = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: 0.55 }));
+    edges.position.copy(mesh.position);
+    mesh.userData.edges = edges;
+    mesh.userData.dim = c.dim;
+    mesh.userData.owner = c.owner;
+    edges.userData = mesh.userData;   // shared: both fade/hide together
+    claimGroup.add(mesh, edges);
+  }
+}
+
+// claims of the dimension we are in, and only close enough to matter
+function updateClaimVisibility() {
+  for (const ch of claimGroup.children) {
+    const dimOk = ch.userData.dim === dim;
+    const dx = ch.position.x - camera.position.x, dz = ch.position.z - camera.position.z;
+    const near = Math.hypot(dx, dz) < 140;
+    ch.visible = dimOk && near;
+  }
+}
+
+ // id -> {group, parts, walkPhase, swingT, armorSig}
 let netJump = false, prevSwingT = 0;
 const lastSentPos = { x: 0, y: 0, z: 0 };
 
@@ -3757,6 +3839,11 @@ function afterEdit() { save(); }
 // instead of silently vanishing.
 const editOutbox = new Map();  // "dim,x,y,z" -> {dim,x,y,z,id,f,seq}
 const batchKeys = new Map();   // batchId -> [[key, seq], ...]
+const inflight = new Map();    // key -> seq of the edit already on its way
+
+// Send the edits that are NOT already in flight. Without this the first 500
+// entries were re-sent on every flush until an ack came back, so on a slow or
+// busy link a big build crawled to the server instead of streaming in.
 let batchSeq = 0, outboxSeq = 0;
 const OUTBOX_MAX = 40000;
 
@@ -3795,6 +3882,7 @@ function flushOutbox(force = false) {
   outboxSavedAt = simTime;
   const list = [], keys = [];
   for (const [k, e] of editOutbox) {
+    if (inflight.get(k) === e.seq) continue;   // already on the wire
     const o = { dim: e.dim, x: e.x, y: e.y, z: e.z, id: e.id };
     if (Number.isInteger(e.f) && e.f >= 0) o.f = e.f;
     list.push(o); keys.push([k, e.seq]);
@@ -3803,6 +3891,7 @@ function flushOutbox(force = false) {
   if (!list.length) return;
   const batch = ++batchSeq;
   batchKeys.set(batch, keys);
+  for (const [k, seq] of keys) inflight.set(k, seq);
   net.sendEdits(list, batch);
   if (batchKeys.size > 400) { // socket is very unhealthy: forget the oldest
     const oldest = batchKeys.keys().next().value;
@@ -3815,6 +3904,7 @@ function ackBatch(batch) {
   if (!keys) return;
   batchKeys.delete(batch);
   for (const [k, seq] of keys) {
+    if (inflight.get(k) === seq) inflight.delete(k);
     const cur = editOutbox.get(k);
     if (cur && cur.seq === seq) editOutbox.delete(k); // newer edit for the same block? keep it
   }
@@ -3880,9 +3970,15 @@ function renderTabList(force = false) {
     return '\u2665'.repeat(Math.max(0, full)) + '\u2661'.repeat(Math.max(0, 10 - full));
   };
   const status = net.online ? 'online' : net.status;
-  const mine = [net.name + ' (you)' + (net.isOp() ? ' \u2605' : ''), pingBars(net.ping), hearts(player), '\u00b7 ' + status];
+  const mine = [
+    `${net.name} (you)` + (net.isOp() ? ' \u2605' : '') + (sleepUI.n && sleepUI.names.includes(net.name) ? ' \u{1F4A4}' : '') +
+      (myTeam ? ` \u00b7 <span style="color:${esc(myTeam.color)}">${esc(myTeam.name)}</span>` : ''),
+    pingBars(net.ping), hearts(player), '\u00b7 ' + status,
+  ];
+  const tagColor = (q) => (typeof q.color === 'string' && q.color ? ` style="color:${esc(q.color)}"` : '');
   const others = [...net.players.values()].map(q => [
-    esc(q.name) + (net.isOp(q.id) ? ' \u2605' : ''),
+    `<span${tagColor(q)}>${esc(q.name)}</span>` + (net.isOp(q.id) ? ' \u2605' : '') +
+      (q.sleeping ? ' \u{1F4A4}' : '') + (q.team ? ' \u00b7 ' + esc(q.team) : ''),
     pingBars(q.ping), hearts(q), '\u00b7 ' + esc(q.dim || 'overworld'),
   ]);
   const sig = JSON.stringify([mine, others]);
@@ -3915,7 +4011,7 @@ function removeRemote(id) {
   remoteModels.delete(id);
 }
 
-function makeNameSprite(name, hue = 0) {
+function makeNameSprite(name, hue = 0, cssColor = null) {
   const c = document.createElement('canvas');
   c.width = 256; c.height = 48;
   const g = c.getContext('2d');
@@ -3924,7 +4020,7 @@ function makeNameSprite(name, hue = 0) {
   g.fillStyle = 'rgba(0,0,0,0.55)';
   const w = Math.min(250, g.measureText(name).width + 24);
   g.fillRect(128 - w / 2, 4, w, 38);
-  g.fillStyle = `hsl(${hue}, 85%, 78%)`;
+  g.fillStyle = cssColor || `hsl(${hue}, 85%, 78%)`;
   g.fillText(name, 128, 32);
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false, transparent: true }));
   sp.scale.set(1.9, 0.36, 1);
@@ -4012,6 +4108,7 @@ function raycastRemotePlayers(ox, oy, oz, dx, dy, dz, maxT) {
 }
 
 function updateRemotes(dt) {
+  if (typeof updateClaimVisibility === 'function') updateClaimVisibility();
   if (!mpSession) { if (remoteModels.size) for (const id of [...remoteModels.keys()]) removeRemote(id); return; }
   if (net.online) {
     flushOutbox();
@@ -4027,13 +4124,26 @@ function updateRemotes(dt) {
       const parts = buildPlayerModel();
       let hue = 0;
       for (const ch of String(p.name || '')) hue = (hue * 31 + ch.codePointAt(0)) % 360;
-      const tag = makeNameSprite(p.name, hue);
+      const tag = makeNameSprite(p.name, hue, typeof p.color === 'string' ? p.color : null);
       tag.position.y = 2.15;
       parts.group.add(tag);
       scene.add(parts.group);
-      r = { group: parts.group, parts, walkPhase: Math.random() * 6, swingT: 99, armorSig: '', heldSig: -1 };
+      r = {
+        group: parts.group, parts, walkPhase: Math.random() * 6, swingT: 99,
+        armorSig: '', heldSig: -1, tag, tagName: p.name, tagHue: hue,
+        tagColor: typeof p.color === 'string' ? p.color : null,
+      };
       r.group.position.set(p.p[0], p.p[1], p.p[2]);
       remoteModels.set(id, r);
+    }
+    const wantColor = typeof p.color === 'string' ? p.color : null;
+    if (r.tagName !== p.name || r.tagColor !== wantColor) {
+      r.tagName = p.name; r.tagColor = wantColor;
+      if (r.tag) { r.group.remove(r.tag); if (r.tag.material.map) r.tag.material.map.dispose(); r.tag.material.dispose(); }
+      const hue = (() => { let h = 0; for (const ch of String(p.name || '')) h = (h * 31 + ch.codePointAt(0)) % 360; return h; })();
+      r.tag = makeNameSprite(p.name, hue, wantColor);
+      r.tag.position.y = 2.15;
+      r.group.add(r.tag);
     }
     const sameDim = (p.dim || 'overworld') === dim;
     r.group.visible = sameDim && !player.dead;
@@ -4121,6 +4231,11 @@ initChat({
   isMP: () => !!mpSession,
   disconnectMP: () => { save(); try { net.disconnect(); } catch (e) {} try { sessionStorage.removeItem('webcraft_mp'); } catch (e) {} location.reload(); },
   afterTeleport, afterEdit,
+  // used by the newer commands (/lock aims with the crosshair, /back needs the
+  // last death position)
+  currentTarget, lastDeathPos: () => lastDeath, getTeam: () => myTeam,
+  // /light reads the levels of the block you look at
+  lightAt: (x, y, z) => ({ block: world.light.get(x, y, z), sky: world.light.getSky(x, y, z), brightness: world.light.brightness(x, y, z) }),
   relock: relockPointer,
 });
 
@@ -4137,7 +4252,11 @@ if (mpSession) {
   // edits that never reached the server (offline session / dropped socket)
   // are restored and pushed again as soon as we are online
   outboxLoad(saved && saved.mpOutbox);
-  net.connect(mpSession.addr, mpSession.name, {
+  const mpEvents = {
+    // filled right below: kept as a reference so tools/tests can drive the very
+    // same handlers the network layer uses
+  };
+  net.connect(mpSession.addr, mpSession.name, Object.assign(mpEvents, {
     getPos: () => [player.pos.x, player.pos.y, player.pos.z],
     getYaw: () => player.yaw,
     getPitch: () => player.pitch,
@@ -4167,7 +4286,7 @@ if (mpSession) {
       mpSendPos(true);
     },
     onStatus: (st) => {
-      if (st === 'reconnecting') chatSys('Connection lost — reconnecting…');
+      if (st === 'reconnecting') { inflight.clear(); chatSys('Connection lost — reconnecting…'); }
       tabListRowsSig = '';
     },
     onOpen: () => { flushOutbox(true); mpSendPos(true); },
@@ -4181,7 +4300,7 @@ if (mpSession) {
     onSys: (text) => chatMessage(text, '#ffff55'),
     onSets: (list) => {
       const worlds = [worldOver, worldNether, worldEnd];
-      for (const w of worlds) w._muteEdit = true;
+      for (const w of worlds) { w._muteEdit = true; w.beginBulk(); }   // one light pass per batch
       try {
         for (const s of list) {
           const w = s.dim === 'nether' ? worldNether : s.dim === 'end' ? worldEnd : worldOver;
@@ -4197,7 +4316,7 @@ if (mpSession) {
           }
         }
       } finally {
-        for (const w of worlds) w._muteEdit = false;
+        for (const w of worlds) { w._muteEdit = false; w.endBulk(); }
       }
     },
     onTime: (t) => { if (Math.abs(t - timeOfDay) > 0.004) timeOfDay = t; },
@@ -4207,7 +4326,7 @@ if (mpSession) {
     onHurt: (m) => {
       if (m.id === net.myId) {
         if (m.by) lastPlayerAttacker = m.by;
-        player.damage(Math.max(1, m.dmg | 0), simTime, 'attack');
+        player.damage(Math.max(1, m.dmg | 0), simTime, 'attack', true); // server-confirmed: never dropped
         if (!player.dead) {
           const k = m.crit ? 9 : 6;
           player.vel.x += (m.kx || 0) * k;
@@ -4233,6 +4352,52 @@ if (mpSession) {
       if (es && es[0]) es[0].vel = { x: +m.vx || 0, y: (+m.vy || 0) + 1, z: +m.vz || 0 };
     },
     onGone: (nid) => drops.removeByNid(nid),
+    // ---- community events -------------------------------------------------
+    onTp: (m) => {
+      // server-driven teleport: /home, /tpaccept, /spawn from an operator
+      if (m.dim && m.dim !== dim) {
+        switchDimension(m.dim);
+      }
+      player.teleport(m.x, m.y, m.z);
+      afterTeleport();
+      toast(`Teleported: ${m.why || 'server'}`, 2.5);
+      chatSys(`Teleported (${m.why || 'server'})`);
+    },
+    onLock: (list) => {
+      lockMap.clear();
+      for (const [k, owner] of list) lockMap.set(k, owner);
+      lockedSet = lockMap;
+    },
+    onClaims: (list) => { claimsList = list; rebuildClaims(); },
+    onClaimInfo: (list) => {
+      if (!list.length) { chatSys('No claims in this world yet'); return; }
+      chatSys(`Claims (${list.length}):`);
+      for (const c of list) chatSys(`  ${c.owner} · ${c.dim} · x ${c.x - c.r}..${c.x + c.r} · z ${c.z - c.r}..${c.z + c.r}`);
+    },
+    onTeamInfo: (m) => { myTeam = { name: m.name, color: m.color }; chatSys(`You are in team ${m.name} (${m.n} member${m.n === 1 ? '' : 's'})`); },
+    onTeamsInfo: (list) => {
+      if (!list.length) { chatSys('No teams yet — create one with /team create <name>'); return; }
+      chatSys(`Teams (${list.length}):`);
+      for (const t of list) chatSys(`  ${t.name} — ${t.n} member${t.n === 1 ? '' : 's'}`);
+    },
+    onTeams: () => { tabListRowsSig = ''; },
+    onTpaReq: (m) => {
+      chatMessage(`${m.from} wants to teleport to you — /tpaccept ${m.from} · /tpdeny ${m.from}`, '#9fdcff');
+      toast(`${m.from} requests a teleport (T → /tpaccept ${m.from})`, 5);
+    },
+    onSleep: (m) => {
+      sleepUI = m;
+      tabListRowsSig = '';
+      if (m.n && m.total && m.n < m.total) toast(`Sleeping ${m.n}/${m.total}: ${m.names.join(', ')}`, 3);
+    },
+    onStats: (m) => {
+      chatSys(`${m.name} — placed ${m.placed} · broken ${m.broken} · kills ${m.kills} · deaths ${m.deaths}`);
+    },
+    onTop: (list) => {
+      if (!list.length) { chatSys('No statistics yet'); return; }
+      chatSys('Top builders / fighters:');
+      list.forEach((s, i) => chatSys(`  ${i + 1}. ${s.name} — placed ${s.placed}, broken ${s.broken}, kills ${s.kills}, deaths ${s.deaths}`));
+    },
     onKick: (reason) => {
       toast('Kicked: ' + reason, 4);
       chatErr('Kicked: ' + reason);
@@ -4243,7 +4408,8 @@ if (mpSession) {
       for (const id of [...remoteModels.keys()]) removeRemote(id);
       tabListRowsSig = '';
     },
-  });
+  }));
+  mpWorldEvents = mpEvents;
 
   // keep the position flowing even when the tab is in the background (the
   // browser pauses requestAnimationFrame there, which used to look like a
@@ -4314,6 +4480,24 @@ window.__game = {
   },
   suppressSave: () => { wipeSave = true; },
   saveNow: () => { save(); return true; },
+  lastDeathPos: () => lastDeath,
+  // world lighting (used by the tests): block light, sky light and the final
+  // brightness that ends up in the vertex colours
+  lightAt: (x, y, z) => ({
+    block: world.light.get(x, y, z),
+    sky: world.light.getSky(x, y, z),
+    brightness: +world.light.brightness(x, y, z).toFixed(3),
+  }),
+  lightStats: () => ({ ...world.light.stats, pending: world.light.pending() }),
+  // drive the very same handler the network layer uses when the server sends
+  // a batch of block edits (used by the tests)
+  applyServerSets: (list) => { mpWorldEvents && mpWorldEvents.onSets(list); },
+  relightAll: () => { world.light.relightAll(); world.light.process(1e9); world.flushDirty(1e9); },
+  afterTeleport: () => afterTeleport(),
+  locks: () => Object.fromEntries(lockedSet),
+  team: () => myTeam,
+  sleepState: () => sleepUI,
+  claims: () => claimsList.map(c => ({ ...c })),
   getSaveKey: () => SAVE_KEY,
   setGameMode: (m) => applyGameMode(m, { silent: true }),
   cycleCamera, getCamMode: () => camMode,

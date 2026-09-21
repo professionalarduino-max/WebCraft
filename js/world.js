@@ -5,12 +5,16 @@ import * as THREE from 'three';
 import { Perlin, fbm2, hash2, hash3 } from './noise.js';
 import { B, BLOCKS, isOpaque, tileUV, blockBoxes, emitBox, emitCross } from './blocks.js';
 import { updatePower, rsTouch as rsMechTouch, rsObserve } from './redstone.js';
+import { LightEngine, LIGHT_CURVE } from './light.js';
 
 export const CHUNK = 16;
 export const HEIGHT = 80;
 export const SEA = 30;
 
 const AO_VALS = [1.0, 0.8, 0.64, 0.5];
+
+// the six face directions, used when a whole block needs one light value
+const NEIGH6 = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
 
 // Face table: dir, 4 corners [x,y,z,u,v] (CCW from outside), base shade.
 const FACES = [
@@ -41,6 +45,11 @@ export class World {
     this.pCave1 = new Perlin(this.seed + 202);
     this.pCave2 = new Perlin(this.seed + 303);
     this._frame = 0;
+    // block light (torches, lava, lamps…) + sky light, see js/light.js
+    this.light = new LightEngine(this, key, CHUNK, HEIGHT);
+    // baseline brightness of the dimension: the Nether and the End have no
+    // daylight, so they keep a dim base glow instead of going pitch black
+    this.dimFloor = dim === 'nether' ? 0.34 : dim === 'end' ? 0.42 : 0.055;
     // one stronghold per overworld, a few hundred blocks out
     if (dim === 'overworld') {
       const a = hash2(this.seed, 991, this.seed) * Math.PI * 2;
@@ -94,17 +103,44 @@ export class World {
     const p = this.pNoise;
     const LAVA_SEA = 26;
     const baseX = cx * CHUNK, baseZ = cz * CHUNK;
+    const H2 = CHUNK * CHUNK;
+    // Everything below depends only on x/z, so it is computed ONCE per column
+    // instead of once per block: the same blocks come out, ~40% faster.
+    const colFloor = new Int16Array(H2);
+    const colCeil = new Int16Array(H2);
+    const colSpike = new Uint8Array(H2);
+    const colRegion = new Float64Array(H2);
+    const colPatch = new Float64Array(H2);
     for (let lz = 0; lz < CHUNK; lz++) {
       for (let lx = 0; lx < CHUNK; lx++) {
+        const i = lx + lz * CHUNK;
         const wx = baseX + lx, wz = baseZ + lz;
-        const floorH = Math.round(24 + fbm2(p, wx * 0.02, wz * 0.02, 3) * 12);
-        const ceilH = Math.round(58 + fbm2(p, wx * 0.015 + 700, wz * 0.015 - 700, 3) * 10);
-        for (let y = 0; y < HEIGHT; y++) {
+        colFloor[i] = Math.round(24 + fbm2(p, wx * 0.02, wz * 0.02, 3) * 12);
+        colCeil[i] = Math.round(58 + fbm2(p, wx * 0.015 + 700, wz * 0.015 - 700, 3) * 10);
+        const sp = hash3(wx, 3, wz, this.seed ^ 0x7a11) < 0.045
+          ? 2 + ((hash3(wx, 5, wz, this.seed ^ 0x1c) * 5) | 0) : 0;
+        colSpike[i] = sp;
+        colRegion[i] = fbm2(p, wx * 0.012 + 11, wz * 0.012 - 7, 2);
+        colPatch[i] = fbm2(p, wx * 0.09 - 5, wz * 0.09 + 3, 2);
+      }
+    }
+    // y outermost: a chunk is written in long contiguous runs instead of
+    // jumping 512 bytes per block (friendlier for the cache, same result)
+    for (let y = 0; y < HEIGHT; y++) {
+      const yBase = y * H2;
+      const bedrockRow = y <= 1 || y >= HEIGHT - 2;
+      const lavaRow = y <= LAVA_SEA;
+      const debrisRow = y > 26 && y < 42;
+      for (let lz = 0; lz < CHUNK; lz++) {
+        for (let lx = 0; lx < CHUNK; lx++) {
+          const i = lx + lz * CHUNK;
+          const wx = baseX + lx, wz = baseZ + lz;
+          const floorH = colFloor[i], ceilH = colCeil[i];
           let id = B.AIR;
-          if (y <= 1 || y >= HEIGHT - 2) id = B.BEDROCK;
+          if (bedrockRow) id = B.BEDROCK;
           else if (y <= floorH || y >= ceilH) id = B.NETHERRACK;
           else if (this.pCave1.noise3(wx * 0.05, y * 0.05, wz * 0.05) > 0.42) id = B.NETHERRACK; // pillars
-          else if (y <= LAVA_SEA) id = B.LAVA;
+          else if (lavaRow) id = B.LAVA;
           if (id === B.NETHERRACK) {
             const h = hash3(wx, y, wz, this.seed ^ 0x33f1);
             if (h < 0.014) id = B.QUARTZ_ORE;
@@ -112,13 +148,13 @@ export class World {
             else if (y <= floorH + 2 && y >= floorH - 1) {
               // floor biomes: slow noise picks blackstone / soul sand, faster noise
               // scatters basalt patches and magma crust
-              const region = fbm2(p, wx * 0.012 + 11, wz * 0.012 - 7, 2);
-              const patch = fbm2(p, wx * 0.09 - 5, wz * 0.09 + 3, 2);
+              const region = colRegion[i];
+              const patch = colPatch[i];
               if (region < -0.3) id = B.BLACKSTONE;
               else if (region > 0.28 && patch > 0.3) id = B.SOUL_SAND;
               else if (patch < -0.45) id = B.BASALT;
               else if (patch > 0.55 && y >= floorH) id = B.MAGMA;
-            } else if (y > 26 && y < 42 && hash3(wx >> 2, y >> 2, wz >> 2, this.seed ^ 0x55aa) < 0.0035) {
+            } else if (debrisRow && hash3(wx >> 2, y >> 2, wz >> 2, this.seed ^ 0x55aa) < 0.0035) {
               id = B.ANCIENT_DEBRIS;   // very rare, only in the deep layers
             }
           } else if (id === B.AIR && y >= ceilH - 2) {
@@ -128,11 +164,10 @@ export class World {
             else if (h < 0.058) id = B.SHROOMLIGHT;
           } else if (id === B.AIR && y < ceilH) {
             // basalt stalactites under the ceiling
-            const spike = hash3(wx, 3, wz, this.seed ^ 0x7a11) < 0.045
-              ? 2 + ((hash3(wx, 5, wz, this.seed ^ 0x1c) * 5) | 0) : 0;
+            const spike = colSpike[i];
             if (spike && y >= ceilH - spike) id = B.BASALT;
           }
-          data[lx + lz * CHUNK + y * CHUNK * CHUNK] = id;
+          data[yBase + i] = id;
         }
       }
     }
@@ -537,6 +572,10 @@ export class World {
       c = { cx, cz, data: this.genChunkData(cx, cz), meshO: null, meshW: null, hasMesh: false };
       this.chunks.set(k, c);
       this.rsScanChunk(c);
+      // sky light + every light source in the chunk, plus light arriving from
+      // the neighbours: the mesher needs it before the first mesh is built
+      this.light.initChunk(c);
+      this.light.process(1.5);
     }
     return c;
   }
@@ -567,6 +606,14 @@ export class World {
     if (old !== id) this.rsTouch(x, y, z, old, id); // redstone registries
     if (old !== id) { try { rsObserve(this, x, y, z); } catch (e) {} } // watchers pulse
     if (old !== id) this.liquidTouch(x, y, z, old, id); // liquid flow queue
+    if (old !== id) {
+      try {
+        this.light.onBlockChange(x, y, z, old, id);   // torches, lamps, shadows
+        // light up right away, not next frame — but not once per block while a
+        // whole batch (e.g. the join snapshot) is being applied
+        if (!this._bulk) this.light.process(1.5);
+      } catch (e) {}
+    }
 
     const k = key(cx, cz);
     let ce = this.edits.get(k);
@@ -698,7 +745,8 @@ export class World {
     const { cx, cz, data } = c;
     const baseX = cx * CHUNK, baseZ = cz * CHUNK;
     const opq = { pos: [], nor: [], uv: [], col: [], idx: [] };
-    const wat = { pos: [], nor: [], uv: [], col: [], idx: [] }; // col unused (no vertex colors)
+    const lit = { pos: [], nor: [], uv: [], col: [], idx: [] }; // faces lit by the player
+    const wat = { pos: [], nor: [], uv: [], col: [], idx: [] };
     const lav = { pos: [], nor: [], uv: [], col: [], idx: [] };
 
     const get = (lx, y, lz) => {
@@ -709,6 +757,41 @@ export class World {
       return this.getBlock(baseX + lx, y, baseZ + lz);
     };
     const occ = (lx, y, lz) => isOpaque(get(lx, y, lz)) ? 1 : 0;
+    // brightness baked into the vertex colours: light curve + the dim base glow
+    // of the dimension (the Nether and the End have no daylight)
+    const bri = (l) => (l <= 0 ? this.dimFloor : Math.max(LIGHT_CURVE[l], this.dimFloor));
+    // Light of the 3x3 chunk neighbourhood, resolved once per chunk: reading it
+    // per vertex through the world map (string keys!) was the slow part.
+    const nbLight = new Array(9).fill(null);
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const ch = this.chunks.get(key(cx + dx, cz + dz));
+        nbLight[(dx + 1) + (dz + 1) * 3] = ch && ch.light ? ch : null;
+      }
+    }
+    const lightAt = (wx, y, wz) => {
+      if (y < 0) return 0;
+      if (y >= HEIGHT) return 15;                 // open sky above the world
+      const dx = (wx >> 4) - cx, dz = (wz >> 4) - cz;
+      if (dx < -1 || dx > 1 || dz < -1 || dz > 1) return 0;
+      const ch = nbLight[(dx + 1) + (dz + 1) * 3];
+      if (!ch) return 0;
+      const i = (wx & 15) + (wz & 15) * 16 + y * 256;
+      const b = ch.light[i], s = ch.sky[i];
+      return b > s ? b : s;
+    };
+    // a single light value for a whole partial block (slab, stairs, flowers…)
+    const blockLight = (lx, y, lz) => {
+      const wx = baseX + lx, wz = baseZ + lz;
+      let best = lightAt(wx, y, wz);
+      if (best < 15) {
+        for (const d of NEIGH6) {
+          const l = lightAt(wx + d[0], y + d[1], wz + d[2]);
+          if (l > best) best = l;
+        }
+      }
+      return bri(best);
+    };
 
     for (let y = 0; y < HEIGHT; y++) {
       for (let lz = 0; lz < CHUNK; lz++) {
@@ -723,7 +806,7 @@ export class World {
           if (blk.shape) {
             const buf = blk.glow ? lav : opq;
             if (blk.shape === 'cross') {
-              emitCross(buf, lx, y, lz, blk.side);
+              emitCross(buf, lx, y, lz, blk.side, blk.glow ? 1 : blockLight(lx, y, lz));
               continue;
             }
             let conn = null;
@@ -761,31 +844,46 @@ export class World {
                 boxes = blockBoxes(below).map(b => ({ ...b, top: blk.top, bottom: blk.bottom, side: blk.side }));
               }
             }
-            for (const box of boxes) emitBox(buf, lx, y, lz, box, cull);
+            const bl = blk.glow ? 1 : blockLight(lx, y, lz);
+            for (const box of boxes) emitBox(buf, lx, y, lz, box, cull, bl);
             continue;
           }
 
-          for (const f of FACES) {
-            const nb = get(lx + f.dir[0], y + f.dir[1], lz + f.dir[2]);
+          for (let fi = 0; fi < FACES.length; fi++) {
+            const f = FACES[fi];
+            const fd = f.dir;
+            const nb = get(lx + fd[0], y + fd[1], lz + fd[2]);
             if (isOpaque(nb)) continue;
             if (nb === id && (water || lava || id === B.GLASS || id === B.COBWEB)) continue;
 
-            const tile = f.dir[1] === 1 ? blk.top : f.dir[1] === -1 ? blk.bottom : blk.side;
+            const tile = fd[1] === 1 ? blk.top : fd[1] === -1 ? blk.bottom : blk.side;
             const r = tileUV(tile);
-            const buf = water ? wat : lava ? lav : opq;
-            const base = buf.pos.length / 3;
-
             // AO axes
-            const a = f.dir[0] !== 0 ? 0 : f.dir[1] !== 0 ? 1 : 2;
+            const a = fd[0] !== 0 ? 0 : fd[1] !== 0 ? 1 : 2;
             const t1 = a === 0 ? 1 : 0, t2 = a === 2 ? 1 : 2;
             const front = [lx, y, lz];
-            front[a] += f.dir[a];
+            front[a] += fd[a];
+
+            // which light lights this face: torch light (constant, drawn unlit so
+            // it glows at night) or daylight/sky light (drawn lit, dims with sun)
+            const fx = baseX + front[0], fz = baseZ + front[2];
+            const fc = nbLight[(((fx >> 4) - cx) + 1) + (((fz >> 4) - cz) + 1) * 3];
+            const fli = fc ? (fx & 15) + (fz & 15) * 16 + front[1] * 256 : -1;
+            const fBlock = fli >= 0 ? fc.light[fli] : 0;
+            const fSky = fli >= 0 ? fc.sky[fli] : (front[1] >= HEIGHT ? 15 : 0);
+            // "lit" faces are drawn without the sun, so a torch keeps lighting
+            // its little corner of the world at midnight exactly as at noon.
+            // The threshold is generous (>= 9, about nine blocks from a torch)
+            // so the pool of light is not swallowed by moonlight.
+            const fLit = fBlock >= 9 || (fBlock > fSky && fBlock >= 4);
+            const buf = water ? wat : lava ? lav : (fLit ? lit : opq);
+            const base = buf.pos.length / 3;
 
             const ao = [0, 0, 0, 0];
             for (let ci = 0; ci < 4; ci++) {
               const corner = f.corners[ci];
               buf.pos.push(lx + corner[0], y + corner[1], lz + corner[2]);
-              buf.nor.push(f.dir[0], f.dir[1], f.dir[2]);
+              buf.nor.push(fd[0], fd[1], fd[2]);
               buf.uv.push(corner[3] ? r.u1 : r.u0, corner[4] ? r.v1 : r.v0);
               if (!water && !lava) {
                 const s1o = [...front], s2o = [...front], co = [...front];
@@ -796,8 +894,18 @@ export class World {
                 const cc = occ(co[0], co[1], co[2]);
                 const lvl = (s1 && s2) ? 3 : s1 + s2 + cc;
                 ao[ci] = lvl;
-                const l = f.shade * AO_VALS[lvl];
-                opq.col.push(l, l, l);
+                // smooth light: average the light of the cells touching this
+                // corner (the ones that are not solid)
+                let sum = bri(fLit ? fBlock : fSky), n = 1;
+                if (!s1) { sum += bri(lightAt(baseX + s1o[0], s1o[1], baseZ + s1o[2])); n++; }
+                if (!s2) { sum += bri(lightAt(baseX + s2o[0], s2o[1], baseZ + s2o[2])); n++; }
+                if (!cc) { sum += bri(lightAt(baseX + co[0], co[1], baseZ + co[2])); n++; }
+                const l = f.shade * AO_VALS[lvl] * (sum / n);
+                buf.col.push(l, l, l);
+              } else if (water) {
+                // water has no AO, but it should still go dark in a cave
+                const l = bri(Math.max(fBlock, fSky)) * 0.97;
+                wat.col.push(l, l, l);
               }
             }
             if (water || lava) {
@@ -823,13 +931,18 @@ export class World {
       g.computeBoundingSphere();
       return g;
     };
-    return { opaque: makeGeo(opq, true), water: makeGeo(wat, false), lava: makeGeo(lav, false) };
+    return {
+      opaque: makeGeo(opq, true),
+      lit: makeGeo(lit, true),
+      water: makeGeo(wat, true),
+      lava: makeGeo(lav, false),
+    };
   }
 
   buildMesh(cx, cz) {
     const c = this.ensureData(cx, cz);
     this.disposeMeshes(c);
-    const { opaque, water, lava } = this.buildChunkGeometry(c);
+    const { opaque, lit, water, lava } = this.buildChunkGeometry(c);
     if (opaque) {
       c.meshO = new THREE.Mesh(opaque, this.materials.opaque);
       c.meshO.position.set(cx * CHUNK, 0, cz * CHUNK);
@@ -841,6 +954,11 @@ export class World {
       c.meshW.renderOrder = 1;
       this.scene.add(c.meshW);
     }
+    if (lit) { // torch-lit faces: unlit material, so they glow at night too
+      c.meshB = new THREE.Mesh(lit, this.materials.lit);
+      c.meshB.position.set(cx * CHUNK, 0, cz * CHUNK);
+      this.scene.add(c.meshB);
+    }
     if (lava) {
       c.meshL = new THREE.Mesh(lava, this.materials.lava);
       c.meshL.position.set(cx * CHUNK, 0, cz * CHUNK);
@@ -850,6 +968,7 @@ export class World {
   }
 
   disposeMeshes(c) {
+    if (c.meshB) { this.scene.remove(c.meshB); c.meshB.geometry.dispose(); c.meshB = null; }
     if (c.meshO) { this.scene.remove(c.meshO); c.meshO.geometry.dispose(); c.meshO = null; }
     if (c.meshW) { this.scene.remove(c.meshW); c.meshW.geometry.dispose(); c.meshW = null; }
     if (c.meshL) { this.scene.remove(c.meshL); c.meshL.geometry.dispose(); c.meshL = null; }
@@ -880,16 +999,43 @@ export class World {
       }
     }
 
+    // drain the light queue (a few hundred operations per placed block) and let
+    // the chunks it touched be remeshed
+    const touched = this.light.process(2);
+    if (touched) for (const k of touched) this.dirty.add(k);
+
     if (++this._frame % 240 === 0) this.unloadFar(pcx, pcz);
   }
 
-  flushDirty() {
+  // Applying many edits at once (a friend's build arriving, the join snapshot):
+  // the light queues are filled per block but drained only once at the end.
+  beginBulk() { this._bulk = (this._bulk || 0) + 1; }
+  endBulk() {
+    this._bulk = Math.max(0, (this._bulk || 0) - 1);
+    if (this._bulk === 0) { try { this.light.process(8); } catch (e) {} }
+  }
+
+  // Finish lighting RIGHT NOW (used after a player places/breaks a block, so a
+  // torch lights its corner instantly even if a big build left a long queue).
+  lightBurst(budgetMs = 12) {
+    const touched = this.light.process(budgetMs);
+    if (touched) for (const k of touched) this.dirty.add(k);
+    this.flushDirty(budgetMs);
+  }
+
+  // Light that changed in a chunk means its mesh has to be rebuilt. Rebuilding
+  // is not free, so a big relight (a broken glowstone lights up a whole cave)
+  // is spread over several frames instead of hitching one.
+  flushDirty(budgetMs = 6) {
     if (this.dirty.size === 0) return;
+    const t0 = performance.now();
+    let done = 0;
     for (const k of this.dirty) {
+      this.dirty.delete(k);
       const c = this.chunks.get(k);
-      if (c && c.hasMesh) this.buildMesh(c.cx, c.cz);
+      if (c && c.hasMesh) { this.buildMesh(c.cx, c.cz); done++; }
+      if (performance.now() - t0 > budgetMs && done >= 2) break;
     }
-    this.dirty.clear();
   }
 
   // Drop every chunk mesh (used when leaving this dimension); data stays cached.

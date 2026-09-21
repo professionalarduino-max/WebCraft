@@ -15,6 +15,13 @@ export const COMMANDS = [
   'help', 'gamemode', 'give', 'tp', 'spawn', 'time', 'kill', 'heal', 'clear',
   'fly', 'seed', 'me', 'list', 'players', 'ping', 'tell', 'msg', 'w', 'summon',
   'setblock', 'weather', 'rd', 'locate', 'op', 'kick', 'cam', 'disconnect', 'leave',
+  // world safety
+  'undo', 'back', 'rollback', 'restore', 'light',
+  // grief protection
+  'claim', 'unclaim', 'claims', 'lock', 'ban', 'unban', 'bans',
+  // co-op
+  'sethome', 'home', 'delhome', 'homes', 'tpa', 'tpaccept', 'tpdeny',
+  'team', 'tc', 'sleep', 'wake', 'stat', 'stats', 'top',
 ];
 
 const VALID_MOBS = ['pig', 'sheep', 'cow', 'chicken', 'zombie', 'spider', 'skeleton', 'slime', 'slime_small', 'creeper', 'enderman', 'blaze'];
@@ -134,7 +141,11 @@ function runCommand(cmd, args) {
       chatSys('/gamemode <s|c> · /give <item> [n] · /tp <x y z|player> · /spawn');
       chatSys('/time set <day|noon|night|midnight|ticks> · /weather <clear|rain> · /kill · /heal · /clear · /fly');
       chatSys('/summon <mob> [n] · /setblock <x y z> <id> · /locate <stronghold|village> · /rd <2-8> · /seed');
-      chatSys('/me <emote> · /list · /ping · /tell <player> <msg> · /op · /kick · /cam · /disconnect');
+      chatSys('/me <emote> · /list · /ping · /tell <player> <msg> · /op · /kick · /ban · /cam · /disconnect');
+      chatSys('Protect: /claim [r] · /unclaim · /claims · /lock (look at a block) · /undo [sec] · /light');
+      chatSys('Co-op: /sethome [n] · /home [n] · /homes · /delhome <n> · /tpa <p> · /tpaccept · /tpdeny · /back');
+      chatSys('Teams: /team create <n> · /team join <n> · /team leave · /tc <msg> · /sleep · /wake · /top · /stat');
+      chatSys('Operators: /rollback <min> · /restore · /ban · /unban · /bans · /kick · /op');
       chatSys('Multiplayer: avatars, Tab player list, shared blocks & chests, world chat — Tab completes, ↑↓ history');
       break;
     case 'gamemode': case 'gm': {
@@ -186,6 +197,176 @@ function runCommand(cmd, args) {
       else throw new Error('usage: /time set <day|noon|night|midnight|ticks>');
       game.setTime(((t % 1) + 1) % 1);
       chatSys(`Time set to ${game.getTime().toFixed(3)}`);
+      break;
+    }
+    // --- world safety ----------------------------------------------------
+    case 'undo': {
+      needMP();
+      const sec = Math.max(1, Math.min(900, parseInt(args[0] ?? '60', 10) || 60));
+      game.net.sendUndo(sec, game.net.isOp() && args[1] === '*' ? '*' : null);
+      chatSys(`Asking the server to undo your edits of the last ${sec}s…`);
+      break;
+    }
+    case 'back': {
+      const d = game.lastDeathPos();
+      if (!d) throw new Error('no death position yet');
+      if (d.dim && d.dim !== game.getDim()) game.switchDimension(d.dim);
+      p.teleport(d.x, d.y, d.z);
+      game.afterTeleport();
+      chatSys('Back where you died');
+      break;
+    }
+    case 'rollback': {
+      needMP();
+      if (!game.net.isOp()) throw new Error('operators only');
+      const min = Math.max(0.5, Math.min(120, Number(args[0] ?? '5') || 5));
+      game.net.sendRollback(min);
+      chatSys(`Rolling the world back ${min} minute(s)…`);
+      break;
+    }
+    case 'restore': {
+      needMP();
+      if (!game.net.isOp()) throw new Error('operators only');
+      game.net.sendRestore();
+      chatSys('Restoring the world from the repository backup…');
+      break;
+    }
+
+    // --- grief protection -------------------------------------------------
+    case 'claim': {
+      needMP();
+      const r = Math.max(4, Math.min(64, parseInt(args[0] ?? '16', 10) || 16));
+      game.net.sendClaim(r);
+      break;
+    }
+    case 'unclaim': {
+      needMP();
+      game.net.sendUnclaim();
+      break;
+    }
+    case 'claims': {
+      needMP();
+      game.net.sendClaims();
+      break;
+    }
+    case 'light': {
+      // what the lighting engine thinks of the block you are looking at
+      const hit = game.currentTarget();
+      const p = hit ? { x: hit.x, y: hit.y, z: hit.z } : {
+        x: Math.floor(game.player.pos.x), y: Math.floor(game.player.pos.y) + 1, z: Math.floor(game.player.pos.z),
+      };
+      const l = game.lightAt(p.x, p.y, p.z);
+      const where = hit ? `block ${p.x} ${p.y} ${p.z} (${game.blockNameAt ? game.blockNameAt(p.x, p.y, p.z) : 'block'})` : `your feet (${p.x} ${p.y} ${p.z})`;
+      chatSys(`Light at ${where}: block ${l.block}/15, sky ${l.sky}/15 — brightness ${Math.round(l.brightness * 100)}%`);
+      break;
+    }
+    case 'lock': {
+      needMP();
+      const hit = game.currentTarget();
+      if (!hit) throw new Error('look at a block first');
+      game.net.sendLock(hit.x, hit.y, hit.z, game.getDim());
+      break;
+    }
+    case 'ban': {
+      needMP();
+      if (!game.net.isOp()) throw new Error('operators only');
+      if (!args[0]) throw new Error('usage: /ban <player>');
+      game.net.sendBan(args.join(' '));
+      break;
+    }
+    case 'unban': {
+      needMP();
+      if (!game.net.isOp()) throw new Error('operators only');
+      if (!args[0]) throw new Error('usage: /unban <player>');
+      game.net.sendUnban(args.join(' '));
+      break;
+    }
+    case 'bans': {
+      needMP();
+      game.net.sendBans();
+      break;
+    }
+
+    // --- co-op ------------------------------------------------------------
+    case 'sethome': {
+      needMP();
+      game.net.sendHome('set', args[0] || 'home');
+      break;
+    }
+    case 'home': {
+      needMP();
+      const name = args[0] || 'home';
+      game.net.sendHome(name ? 'go' : 'list', name);
+      break;
+    }
+    case 'homes': {
+      needMP();
+      game.net.sendHome('list', '');
+      break;
+    }
+    case 'delhome': {
+      needMP();
+      game.net.sendHome('del', args[0] || 'home');
+      break;
+    }
+    case 'tpa': {
+      needMP();
+      if (!args[0]) throw new Error('usage: /tpa <player>');
+      game.net.sendTpa(args[0]);
+      break;
+    }
+    case 'tpaccept': case 'tpyes': {
+      needMP();
+      if (!args[0]) throw new Error('usage: /tpaccept <player>');
+      game.net.sendTpAccept(args[0]);
+      break;
+    }
+    case 'tpdeny': case 'tpno': {
+      needMP();
+      if (!args[0]) throw new Error('usage: /tpdeny <player>');
+      game.net.sendTpDeny(args[0]);
+      break;
+    }
+    case 'team': {
+      needMP();
+      const sub = (args[0] || 'list').toLowerCase();
+      if (sub === 'create' || sub === 'join') {
+        if (!args[1]) throw new Error(`usage: /team ${sub} <name>`);
+        game.net.sendTeam(sub, args.slice(1).join(' '));
+      } else if (sub === 'leave') {
+        game.net.sendTeam('leave', '');
+      } else {
+        game.net.sendTeam('list', '');
+      }
+      break;
+    }
+    case 'tc': case 'teamchat': {
+      needMP();
+      if (!args.length) throw new Error('usage: /tc <message>');
+      game.net.sendTeamChat(args.join(' '));
+      chatMessage(`[team] <${game.myName()}> ${args.join(' ')}`, '#9fe8c0');
+      break;
+    }
+    case 'sleep': {
+      needMP();
+      game.net.sendSleep(false);
+      chatSys('Sleeping… (the night ends when everyone sleeps)');
+      break;
+    }
+    case 'wake': {
+      needMP();
+      game.net.sendSleep(true);
+      chatSys('Woke up');
+      break;
+    }
+    case 'stat': case 'stats': {
+      needMP();
+      game.net.sendStat(args[0] || '');
+      break;
+    }
+    case 'top': {
+      needMP();
+      game.net.sendTop();
       break;
     }
     case 'kill':

@@ -465,6 +465,47 @@ def(B.END_ROD, 'End Rod', TILE.END_ROD, TILE.END_ROD, TILE.END_ROD,
 export const isSolid = (id) => !!(BLOCKS[id] && BLOCKS[id].solid);
 export const isOpaque = (id) => !!(BLOCKS[id] && BLOCKS[id].opaque);
 
+// --- light ------------------------------------------------------------------
+// How much light a block gives off (0 = none). Values follow Minecraft, so a
+// torch lights 14 blocks, glowstone/lanterns/sea lanterns 15, lava 15, a
+// redstone torch 7, magma 3 and so on. The light engine (js/light.js) flood
+// fills these through the world instead of just drawing them bright.
+const LIGHT_EMIT = new Map();
+export function setLightLevel(id, level) { LIGHT_EMIT.set(id, level); }
+export const lightOf = (id) => LIGHT_EMIT.get(id) || 0;
+
+setLightLevel(B.TORCH, 14);
+setLightLevel(B.LANTERN, 15);
+setLightLevel(B.GLOWSTONE, 15);
+setLightLevel(B.SEA_LANTERN, 15);
+setLightLevel(B.SHROOMLIGHT, 15);
+setLightLevel(B.JACK_O_LANTERN, 15);
+setLightLevel(B.END_ROD, 14);
+setLightLevel(B.LAMP_ON, 15);
+setLightLevel(B.BULB_ON, 15);
+setLightLevel(B.MAGMA, 3);
+setLightLevel(B.CRYING_OBSIDIAN, 10);
+setLightLevel(B.AMETHYST, 5);
+setLightLevel(B.LAVA, 15);
+setLightLevel(B.PORTAL, 11);
+setLightLevel(B.END_PORTAL, 15);
+setLightLevel(B.RTORCH, 7);
+setLightLevel(B.FURNACE, 0);        // unlit
+if (B.FURNACE_BURNING != null) setLightLevel(B.FURNACE_BURNING, 13);
+if (B.SOUL_TORCH != null) setLightLevel(B.SOUL_TORCH, 10);
+if (B.SOUL_LANTERN != null) setLightLevel(B.SOUL_LANTERN, 10);
+if (B.CAMPFIRE != null) setLightLevel(B.CAMPFIRE, 15);
+if (B.FIRE != null) setLightLevel(B.FIRE, 15);
+
+// How much light is lost when passing through (0 = the block is solid and
+// blocks it completely). Water dims light quickly, leaves slightly.
+export function lightAtten(id) {
+  if (id === B.WATER) return 2;    // water eats light quickly
+  if (id === B.LEAVES) return 3;   // a tree canopy dims what is under it
+  const b = BLOCKS[id];
+  return !b || b.opaque ? 0 : 1;
+}
+
 // ---------------------------------------------------------------------------
 // Sub-box geometry for non-cube shapes (shared by the chunk mesher and the
 // held-item / dropped-item meshes).
@@ -591,7 +632,7 @@ export function blockBoxes(id, conn = null) {
 // Emit one box into buf {pos,nor,uv,col,idx} at cell origin (x,y,z).
 // cull: per-face booleans ([+x,-x,+y,-y,+z,-z]) — skip faces flush against an
 // opaque neighbor. UVs sample the sub-rect of the tile so patterns line up.
-export function emitBox(buf, x, y, z, box, cull = null) {
+export function emitBox(buf, x, y, z, box, cull = null, light = 1) {
   const flush = [box.x1 === 1, box.x0 === 0, box.y1 === 1, box.y0 === 0, box.z1 === 1, box.z0 === 0];
   for (let i = 0; i < 6; i++) {
     if (cull && cull[i] && flush[i]) continue;
@@ -611,14 +652,15 @@ export function emitBox(buf, x, y, z, box, cull = null) {
       buf.pos.push(x + px, y + py, z + pz);
       buf.nor.push(f.dir[0], f.dir[1], f.dir[2]);
       buf.uv.push(r.u0 + (r.u1 - r.u0) * uf, r.v0 + (r.v1 - r.v0) * vf);
-      buf.col.push(f.shade, f.shade, f.shade);
+      const sh = f.shade * light;
+      buf.col.push(sh, sh, sh);
     }
     buf.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
   }
 }
 
 // Two crossed quads (flowers, torches), emitted double-sided.
-export function emitCross(buf, x, y, z, tile) {
+export function emitCross(buf, x, y, z, tile, light = 1) {
   const r = tileUV(tile);
   const a = 0.15, b = 0.85;
   const quads = [
@@ -634,7 +676,8 @@ export function emitCross(buf, x, y, z, tile) {
       buf.nor.push(0, 1, 0);
       const uf = (i === 0 || i === 3) ? 0 : 1;
       buf.uv.push(r.u0 + (r.u1 - r.u0) * uf, r.v0 + (r.v1 - r.v0) * p[1]);
-      buf.col.push(0.95, 0.95, 0.95);
+      const sh = 0.95 * light;
+      buf.col.push(sh, sh, sh);
     });
     buf.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
   }

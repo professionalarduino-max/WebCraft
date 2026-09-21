@@ -203,6 +203,28 @@ export const net = {
   },
   sendGone(nid) { this.send({ t: 'gone', nid }); },
   sendWeather(mode) { this.send({ t: 'weather', mode }); },
+  // world safety
+  sendUndo(sec, name) { this.send({ t: 'undo', sec, name: name || null }); },
+  sendRollback(min) { this.send({ t: 'rollback', min }); },
+  sendRestore() { this.send({ t: 'restore' }); },
+  // grief protection
+  sendClaim(r) { this.send({ t: 'claim', r }); },
+  sendUnclaim() { this.send({ t: 'unclaim' }); },
+  sendClaims() { this.send({ t: 'claims' }); },
+  sendLock(x, y, z, dim) { this.send({ t: 'lock', x, y, z, dim }); },
+  sendBan(target) { this.send({ t: 'ban', target }); },
+  sendUnban(target) { this.send({ t: 'unban', target }); },
+  sendBans() { this.send({ t: 'bans' }); },
+  // co-op
+  sendHome(op, name) { this.send({ t: 'home', op, name }); },
+  sendTpa(to) { this.send({ t: 'tpa', to }); },
+  sendTpAccept(from) { this.send({ t: 'tpaccept', from }); },
+  sendTpDeny(from) { this.send({ t: 'tpdeny', from }); },
+  sendTeam(op, name) { this.send({ t: 'team', op, name }); },
+  sendTeamChat(text) { this.send({ t: 'teamchat', text }); },
+  sendSleep(out) { this.send({ t: 'sleep', out: out ? 1 : 0 }); },
+  sendStat(name) { this.send({ t: 'stat', name }); },
+  sendTop() { this.send({ t: 'top' }); },
 
   pingTick() {
     if (!this.online) return;
@@ -313,6 +335,18 @@ export const net = {
         break;
       case 'drop': ev.onDrop && ev.onDrop(m); break;
       case 'gone': ev.onGone && ev.onGone(m.nid); break;
+      // world safety / protection / co-op (see main.js for the handlers)
+      case 'tp': ev.onTp && ev.onTp(m); break;
+      case 'lock': ev.onLock && ev.onLock(m.list || []); break;
+      case 'claims': ev.onClaims && ev.onClaims(m.list || []); break;
+      case 'claimInfo': ev.onClaimInfo && ev.onClaimInfo(m.list || []); break;
+      case 'teamInfo': ev.onTeamInfo && ev.onTeamInfo(m); break;
+      case 'teamsInfo': ev.onTeamsInfo && ev.onTeamsInfo(m.list || []); break;
+      case 'teams': ev.onTeams && ev.onTeams(m.list || []); break;
+      case 'tpaReq': ev.onTpaReq && ev.onTpaReq(m); break;
+      case 'sleep': ev.onSleep && ev.onSleep(m); break;
+      case 'stats': ev.onStats && ev.onStats(m); break;
+      case 'top': ev.onTop && ev.onTop(m.list || []); break;
     }
   },
 };

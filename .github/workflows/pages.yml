@@ -1,8 +1,8 @@
-name: Deploy game to GitHub Pages
+name: Deploy WebCraft to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches: [arena/01a0c832-webcraft]
   workflow_dispatch:
 
 permissions:
@@ -16,17 +16,13 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
-        with:
-          # try to switch Pages on automatically; if the token is not allowed to,
-          # enable it once by hand: Settings -> Pages -> Source: GitHub Actions
-          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: .
